@@ -1686,14 +1686,7 @@ function runAnalyzer() {
 
   const termYears = termMonths / 12;
 
-  // Duration (weighted average timing of cashflows) — simplified
-  const discRate = btirr || 0.06;
-  const btNPV = calcNPV(btFlows.annual.slice(1), discRate);
-  let durationNum = 0;
-  btFlows.annual.slice(1).forEach((cf, t) => {
-    durationNum += (t + 1) * (cf / Math.pow(1 + discRate, t + 1));
-  });
-  const duration = btNPV > 0 ? Math.min((durationNum / btNPV), termYears + 2).toFixed(2) : termYears.toFixed(2);
+  const duration = termYears.toFixed(1);
 
   // Sensitivity table — vary exit cap rate
   const capRates = [5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5];
