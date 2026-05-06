@@ -1844,6 +1844,8 @@ async function saveToDB() {
     showToast('Error saving — check deal name and city fields', 'error');
   }
 }
+
+function showToast(msg, type) {
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.className = 'toast show ' + type;
