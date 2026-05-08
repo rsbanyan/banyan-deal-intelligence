@@ -766,6 +766,15 @@ tbody td {
 .result-kpi-value.green { color: var(--green); }
 .result-kpi-value.yellow { color: var(--yellow); }
 
+.result-kpi-sub {
+  font-size: 10px;
+  color: var(--text3);
+  margin-top: 2px;
+  font-family: 'DM Mono', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .sensitivity-table {
   width: 100%;
   border-collapse: collapse;
@@ -859,7 +868,7 @@ tbody td {
 
       <div class="section-header">
         <div class="section-title">All Properties</div>
-        <div style="font-size:12px;color:var(--text3)">Click any row for detail</div>
+        <div style="font-size:12px;color:var(--text3)">Click any row for detail · Duration shown is market-discounted (7%)</div>
       </div>
       <div class="table-wrap">
         <table>
@@ -876,11 +885,12 @@ tbody td {
               <th>Mkt PSF</th>
               <th>Rent/Mkt</th>
               <th>ATIRR</th>
+              <th>Duration</th>
               <th>Est. Value</th>
             </tr>
           </thead>
           <tbody id="deals-tbody">
-            <tr><td colspan="12"><div class="loading"><div class="spinner"></div> Loading deals...</div></td></tr>
+            <tr><td colspan="13"><div class="loading"><div class="spinner"></div> Loading deals...</div></td></tr>
           </tbody>
         </table>
       </div>
@@ -919,7 +929,7 @@ tbody td {
     <!-- ANALYZER VIEW -->
     <div class="view" id="view-analyzer">
       <div class="section-header">
-        <div class="section-title">Deal Analyzer — ATIRR / BTIRR / Sensitivity</div>
+        <div class="section-title">Deal Analyzer — ATIRR / BTIRR / Duration / Sensitivity</div>
       </div>
       <div class="analyzer-grid">
 
@@ -1192,6 +1202,7 @@ tbody td {
 const SUPA_URL = 'https://lgjujubysmkmdkcpjuse.supabase.co/rest/v1';
 const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxnanVqdWJ5c21rbWRrY3BqdXNlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc5OTQ0MjMsImV4cCI6MjA5MzU3MDQyM30.1BTk-uqLXKh2AlpOpCbbQJsLN36WUGryk_d1f1X1vRE';
 const PASSWORD = 'banyan2026';
+const MARKET_DISCOUNT_RATE = 0.07; // 7% — institutional industrial benchmark
 
 const HEADERS = {
   'apikey': SUPA_KEY,
@@ -1207,6 +1218,15 @@ async function supabase(table, params = '') {
 async function supabasePost(table, body) {
   const res = await fetch(`${SUPA_URL}/${table}`, {
     method: 'POST',
+    headers: { ...HEADERS, 'Prefer': 'return=minimal' },
+    body: JSON.stringify(body)
+  });
+  return res;
+}
+
+async function supabasePatch(table, params, body) {
+  const res = await fetch(`${SUPA_URL}/${table}?${params}`, {
+    method: 'PATCH',
     headers: { ...HEADERS, 'Prefer': 'return=minimal' },
     body: JSON.stringify(body)
   });
@@ -1256,6 +1276,7 @@ function fmtM(n) {
 function fmtP(n) { return n ? n.toFixed(2) + '%' : '—'; }
 function fmtPSF(n) { return n && n > 0 ? '$' + parseFloat(n).toFixed(2) : '—'; }
 function fmtDate(d) { return d ? new Date(d).toLocaleDateString('en-US', {month:'short',year:'numeric'}) : '—'; }
+function fmtDur(n) { return n && n > 0 ? n.toFixed(2) + ' yr' : '—'; }
 
 function scoreColor(s) {
   if (s >= 8) return 'var(--green)';
@@ -1279,7 +1300,42 @@ function barColor(pct) {
   return 'var(--orange)';
 }
 
-// DASHBOARD
+// ─── MACAULAY DURATION ─────────────────────────────────────────
+//
+// Duration = Σ [t × CF_t / (1+r)^t]  /  Σ [CF_t / (1+r)^t]
+//
+// Where:
+//   t       = time period (in years, fractional OK)
+//   CF_t    = cash flow received in period t (NOI year 1..N-1; NOI + sale year N)
+//   r       = discount rate (BTIRR for deal-specific, 7% for market benchmark)
+//
+// CF_0 (the purchase price outlay) is excluded — duration measures the
+// weighted-average time to receive RETURNS, not net cash flows.
+//
+// Returns a number of years. Higher duration = more rate-sensitive deal
+// (a deal with duration 8 loses ~8% value per 100bps cap rate move, roughly).
+//
+function calcMacaulayDuration(annualCashflows, discountRate) {
+  // annualCashflows[0] = -purchase price (excluded)
+  // annualCashflows[1..N] = positive cash inflows
+  if (!annualCashflows || annualCashflows.length < 2) return null;
+  if (discountRate == null || !isFinite(discountRate) || discountRate <= -1) return null;
+
+  let weightedTime = 0;
+  let totalPV = 0;
+
+  for (let t = 1; t < annualCashflows.length; t++) {
+    const cf = annualCashflows[t];
+    if (cf <= 0) continue; // only positive inflows count
+    const pv = cf / Math.pow(1 + discountRate, t);
+    weightedTime += t * pv;
+    totalPV += pv;
+  }
+
+  return totalPV > 0 ? weightedTime / totalPV : null;
+}
+
+// ─── DASHBOARD ─────────────────────────────────────────────────
 async function loadDashboard() {
   window.dealsLoaded = true;
   const deals = await supabase('deals', 'deal_category=eq.Banyan&order=settlement_date');
@@ -1292,16 +1348,25 @@ async function loadDashboard() {
   const totalNOI = active.reduce((s,d) => s + (d.annual_noi||0), 0);
   const multiple = totalVal / (totalBanyan * 2);
 
+  // Portfolio-weighted duration (by est_value_high) — market-discounted
+  let durWeightSum = 0, durValSum = 0;
+  active.forEach(d => {
+    if (d.duration_market && d.est_value_high) {
+      durWeightSum += d.duration_market * d.est_value_high;
+      durValSum += d.est_value_high;
+    }
+  });
+  const portfolioDur = durValSum > 0 ? (durWeightSum / durValSum).toFixed(2) : null;
+
   document.getElementById('kpi-strip').innerHTML = `
     <div class="kpi"><div class="kpi-label">Total Purchase</div><div class="kpi-value">${fmtM(totalPurchase)}</div><div class="kpi-sub">${deals.length} properties</div></div>
     <div class="kpi"><div class="kpi-label">Banyan Equity In</div><div class="kpi-value">${fmtM(totalBanyan)}</div><div class="kpi-sub">50% share</div></div>
     <div class="kpi"><div class="kpi-label">Est. Portfolio Value</div><div class="kpi-value green">${fmtM(totalVal * 2)}</div><div class="kpi-sub">Combined</div></div>
     <div class="kpi"><div class="kpi-label">Equity Multiple</div><div class="kpi-value green">${multiple.toFixed(2)}x</div><div class="kpi-sub">On Banyan equity</div></div>
-    <div class="kpi"><div class="kpi-label">Total NOI (100%)</div><div class="kpi-value yellow">${fmtM(totalNOI)}</div><div class="kpi-sub">Active properties</div></div>
+    <div class="kpi"><div class="kpi-label">Portfolio Duration</div><div class="kpi-value yellow">${portfolioDur ? portfolioDur + ' yr' : '—'}</div><div class="kpi-sub">Value-weighted, 7% disc</div></div>
   `;
 
   // FLAGS
-  const urgent = active.filter(d => d.deal_notes && (d.deal_notes.includes('URGENT') || d.deal_notes.includes('NOW')));
   const flags = [
     { title: 'Anaheim — Lease expires ~12 months', sub: 'Waev Tech renewal or re-lease at $15/SF. Crown jewel asset $22-30M. Start now.', cls: '' },
     { title: 'Liberty Houston IOS — Lease expiring 2026', sub: 'At 34% of market rent. Option status TBD. Next lease must be at market ($260K/yr).', cls: '' },
@@ -1340,12 +1405,13 @@ async function loadDashboard() {
       <td class="td-mono" style="color:var(--text3)">${fmtPSF(d.market_rent_psf)}</td>
       <td class="td-mono" style="color:${rentGapColor(parseFloat(pct))}">${pct ? pct + '%' : '—'}</td>
       <td class="td-mono" style="color:var(--accent)">${fmtP(d.atirr)}</td>
+      <td class="td-mono" style="color:var(--yellow)">${fmtDur(d.duration_market)}</td>
       <td class="td-mono" style="color:var(--green)">${fmtM(d.est_value_high)}</td>
     </tr>`;
   }).join('');
 }
 
-// DEAL DETAIL
+// ─── DEAL DETAIL ───────────────────────────────────────────────
 async function showDeal(dealId) {
   showView('detail');
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -1383,11 +1449,12 @@ async function showDeal(dealId) {
       </div>
 
       <div class="detail-card">
-        <div class="detail-card-title">Financials</div>
+        <div class="detail-card-title">Returns &amp; Duration</div>
         <div class="detail-row"><span class="detail-row-label">Entry cap rate</span><span class="detail-row-value">${fmtP(deal.entry_cap_rate)}</span></div>
         <div class="detail-row"><span class="detail-row-label">ATIRR</span><span class="detail-row-value" style="color:var(--accent)">${fmtP(deal.atirr)}</span></div>
         <div class="detail-row"><span class="detail-row-label">BTIRR</span><span class="detail-row-value">${fmtP(deal.btirr)}</span></div>
-        <div class="detail-row"><span class="detail-row-label">Duration (AT)</span><span class="detail-row-value">${deal.duration_at ? deal.duration_at + ' yr' : '—'}</span></div>
+        <div class="detail-row"><span class="detail-row-label">Duration @ BTIRR</span><span class="detail-row-value" style="color:var(--yellow)">${fmtDur(deal.duration_btirr)}</span></div>
+        <div class="detail-row"><span class="detail-row-label">Duration @ market 7%</span><span class="detail-row-value" style="color:var(--yellow)">${fmtDur(deal.duration_market)}</span></div>
         <div class="detail-row"><span class="detail-row-label">Annual NOI</span><span class="detail-row-value">${fmtM(deal.annual_noi)}</span></div>
         <div class="detail-row"><span class="detail-row-label">Est. value (high)</span><span class="detail-row-value" style="color:var(--green)">${fmtM(deal.est_value_high)}</span></div>
       </div>
@@ -1431,7 +1498,7 @@ async function showDeal(dealId) {
   `;
 }
 
-// RENT GAP
+// ─── RENT GAP ──────────────────────────────────────────────────
 async function loadRentGap() {
   window.gapLoaded = true;
   const deals = await supabase('deals',
@@ -1442,8 +1509,6 @@ async function loadRentGap() {
     const locked = (d.market_rent_psf * d.building_sf) - d.annual_noi;
     return s + (locked > 0 ? locked : 0);
   }, 0);
-
-  const maxMarket = Math.max(...deals.map(d => d.market_rent_psf * d.building_sf));
 
   document.getElementById('gap-kpis').innerHTML = `
     <div class="kpi"><div class="kpi-label">Total locked NOI</div><div class="kpi-value yellow">${fmtM(totalLocked)}/yr</div><div class="kpi-sub">Waiting to be released at lease events</div></div>
@@ -1479,7 +1544,7 @@ async function loadRentGap() {
   }).join('');
 }
 
-// MARKETS
+// ─── MARKETS ───────────────────────────────────────────────────
 async function loadMarkets() {
   window.marketsLoaded = true;
   const markets = await supabase('markets', 'order=manufacturing_migration_score.desc');
@@ -1507,7 +1572,7 @@ async function loadMarkets() {
   }).join('');
 }
 
-// ADD DEAL
+// ─── ADD DEAL ──────────────────────────────────────────────────
 async function submitDeal() {
   const body = {
     deal_name: document.getElementById('f-name').value,
@@ -1554,7 +1619,7 @@ async function submitDeal() {
   }
 }
 
-// ─── DEAL ANALYZER ───────────────────────────────────────────────
+// ─── DEAL ANALYZER ─────────────────────────────────────────────
 let analyzeTimer = null;
 function analyzeDebounce() {
   clearTimeout(analyzeTimer);
@@ -1584,16 +1649,13 @@ function calcIRR(cashflows, guess = 0.05) {
 }
 
 function buildCashflows(price, noi, termMonths, escPct, freeRentMonths, termCap, commission, landVal, improvements, incomeTax, cgTax, afterTax) {
-  const monthlyDisc = afterTax ? incomeTax / 100 / 12 : 0;
   const annualEsc = escPct / 100;
 
-  // Build monthly cashflows
   const monthly = [];
   let currentNOI = noi;
   let yearCount = 0;
 
   for (let m = 1; m <= termMonths; m++) {
-    // Annual escalation
     if (m > 1 && (m - 1) % 12 === 0) {
       yearCount++;
       currentNOI = noi * Math.pow(1 + annualEsc, yearCount);
@@ -1601,7 +1663,6 @@ function buildCashflows(price, noi, termMonths, escPct, freeRentMonths, termCap,
     const monthlyNOI = m <= freeRentMonths ? 0 : currentNOI / 12;
 
     if (afterTax) {
-      // Simplified depreciation (39yr straight line on improvements portion)
       const depreciable = price - landVal;
       const monthlyDep = depreciable / (39 * 12);
       const taxableIncome = monthlyNOI - monthlyDep;
@@ -1612,7 +1673,6 @@ function buildCashflows(price, noi, termMonths, escPct, freeRentMonths, termCap,
     }
   }
 
-  // Terminal NOI (last year annualized)
   const terminalNOI = currentNOI;
   const grossSalePrice = terminalNOI / (termCap / 100);
   const netSalePrice = grossSalePrice * (1 - commission / 100);
@@ -1628,7 +1688,6 @@ function buildCashflows(price, noi, termMonths, escPct, freeRentMonths, termCap,
     saleProceeds = netSalePrice;
   }
 
-  // Convert monthly to annual cashflows for IRR
   const annual = [-price];
   for (let y = 0; y < Math.ceil(termMonths / 12); y++) {
     const start = y * 12;
@@ -1640,10 +1699,6 @@ function buildCashflows(price, noi, termMonths, escPct, freeRentMonths, termCap,
   annual[annual.length - 1] += saleProceeds;
 
   return { annual, grossSalePrice, netSalePrice, saleProceeds, terminalNOI };
-}
-
-function calcNPV(cashflows, rate) {
-  return cashflows.reduce((s, cf, t) => s + cf / Math.pow(1 + rate, t), 0);
 }
 
 function runAnalyzer() {
@@ -1684,9 +1739,13 @@ function runAnalyzer() {
   const btirr = calcIRR(btFlows.annual);
   const atirr = calcIRR(atFlows.annual);
 
-  const termYears = termMonths / 12;
+  // ── Macaulay Duration (two flavors) ───────────────────────
+  // Use BTIRR-discounted duration on BT cashflows (deal-specific yield)
+  // Use 7% market discount on BT cashflows (apples-to-apples comparison)
+  const durBtirr  = btirr ? calcMacaulayDuration(btFlows.annual, btirr) : null;
+  const durMarket = calcMacaulayDuration(btFlows.annual, MARKET_DISCOUNT_RATE);
 
-  const duration = termYears.toFixed(1);
+  const termYears = termMonths / 12;
 
   // Sensitivity table — vary exit cap rate
   const capRates = [5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5];
@@ -1700,7 +1759,6 @@ function runAnalyzer() {
     return 'bad';
   }
 
-  // Build sensitivity: exit cap vs hold period → BTIRR
   const senRows = capRates.map(cap => {
     const cells = holdPeriods.map(hold => {
       const holdMonths = hold * 12;
@@ -1725,27 +1783,36 @@ function runAnalyzer() {
           <div class="result-kpi-value accent">${atirr ? (atirr*100).toFixed(2) + '%' : '—'}</div>
         </div>
         <div class="result-kpi">
-          <div class="result-kpi-label">Duration</div>
-          <div class="result-kpi-value">${duration} yr</div>
-        </div>
-        <div class="result-kpi">
           <div class="result-kpi-label">Entry Cap</div>
           <div class="result-kpi-value yellow">${entryCap}%</div>
         </div>
         <div class="result-kpi">
-          <div class="result-kpi-label">Terminal Value</div>
-          <div class="result-kpi-value green">${fmtM(btFlows.grossSalePrice)}</div>
+          <div class="result-kpi-label">Duration @ BTIRR</div>
+          <div class="result-kpi-value yellow">${durBtirr ? durBtirr.toFixed(2) + ' yr' : '—'}</div>
+          <div class="result-kpi-sub">deal-specific</div>
         </div>
         <div class="result-kpi">
-          <div class="result-kpi-label">Net Sale Proceeds</div>
-          <div class="result-kpi-value">${fmtM(btFlows.netSalePrice)}</div>
+          <div class="result-kpi-label">Duration @ 7%</div>
+          <div class="result-kpi-value yellow">${durMarket ? durMarket.toFixed(2) + ' yr' : '—'}</div>
+          <div class="result-kpi-sub">market benchmark</div>
+        </div>
+        <div class="result-kpi">
+          <div class="result-kpi-label">Hold Period</div>
+          <div class="result-kpi-value">${termYears.toFixed(1)} yr</div>
+          <div class="result-kpi-sub">contractual</div>
         </div>
       </div>
 
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
-        ${pricePSF ? `<div style="background:var(--bg3);border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:var(--text3);margin-bottom:3px">PRICE / SF</div><div style="font-family:'DM Mono',monospace;font-size:14px">$${pricePSF}</div></div>` : ''}
-        ${rentToMkt ? `<div style="background:var(--bg3);border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:var(--text3);margin-bottom:3px">RENT / MARKET</div><div style="font-family:'DM Mono',monospace;font-size:14px;color:${parseFloat(rentToMkt) < 80 ? 'var(--yellow)' : 'var(--text)'}">${rentToMkt}%</div></div>` : ''}
-        <div style="background:var(--bg3);border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:var(--text3);margin-bottom:3px">HOLD PERIOD</div><div style="font-family:'DM Mono',monospace;font-size:14px">${termYears.toFixed(1)} yr</div></div>
+        <div style="background:var(--bg3);border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:var(--text3);margin-bottom:3px">TERMINAL VALUE</div><div style="font-family:'DM Mono',monospace;font-size:14px;color:var(--green)">${fmtM(btFlows.grossSalePrice)}</div></div>
+        <div style="background:var(--bg3);border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:var(--text3);margin-bottom:3px">NET SALE PROCEEDS</div><div style="font-family:'DM Mono',monospace;font-size:14px">${fmtM(btFlows.netSalePrice)}</div></div>
+        <div style="background:var(--bg3);border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:var(--text3);margin-bottom:3px">RATE SENSITIVITY</div><div style="font-family:'DM Mono',monospace;font-size:14px;color:var(--accent)">~${durMarket ? durMarket.toFixed(1) : '—'}% / 100bps</div></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+        ${pricePSF ? `<div style="background:var(--bg3);border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:var(--text3);margin-bottom:3px">PRICE / SF</div><div style="font-family:'DM Mono',monospace;font-size:14px">$${pricePSF}</div></div>` : '<div></div>'}
+        ${rentToMkt ? `<div style="background:var(--bg3);border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:var(--text3);margin-bottom:3px">RENT / MARKET</div><div style="font-family:'DM Mono',monospace;font-size:14px;color:${parseFloat(rentToMkt) < 80 ? 'var(--yellow)' : 'var(--text)'}">${rentToMkt}%</div></div>` : '<div></div>'}
+        <div style="background:var(--bg3);border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:var(--text3);margin-bottom:3px">TERMINAL NOI</div><div style="font-family:'DM Mono',monospace;font-size:14px">${fmtM(btFlows.terminalNOI)}</div></div>
       </div>
     </div>
 
@@ -1789,6 +1856,12 @@ function runAnalyzer() {
   `;
 
   document.getElementById('analyzer-results').innerHTML = html;
+
+  // Stash latest results on window for saveToDB to pick up
+  window._analyzerResult = {
+    btirr, atirr, durBtirr, durMarket,
+    grossSalePrice: btFlows.grossSalePrice
+  };
 }
 
 async function saveToDB() {
@@ -1810,6 +1883,8 @@ async function saveToDB() {
   const btFlows = buildCashflows(price, noi, termMonths, escPct, freeRent, termCap, commission, landVal, 0, incomeTax, cgTax, false);
   const atirr = calcIRR(atFlows.annual);
   const btirr = calcIRR(btFlows.annual);
+  const durBtirr  = btirr ? calcMacaulayDuration(btFlows.annual, btirr) : null;
+  const durMarket = calcMacaulayDuration(btFlows.annual, MARKET_DISCOUNT_RATE);
 
   const body = {
     deal_name: name,
@@ -1828,13 +1903,16 @@ async function saveToDB() {
     market_rent_psf: getVal('a-mktpsf') || null,
     atirr: atirr ? +(atirr*100).toFixed(2) : null,
     btirr: btirr ? +(btirr*100).toFixed(2) : null,
+    duration_btirr:  durBtirr  ? +durBtirr.toFixed(2)  : null,
+    duration_market: durMarket ? +durMarket.toFixed(2) : null,
+    duration_calc_date: new Date().toISOString(),
     est_value_high: btFlows.grossSalePrice || null,
-    deal_notes: `Analyzed via Deal Analyzer. Terminal cap: ${termCap}%, Hold: ${termMonths/12}yr, Escalation: ${escPct}%/yr`
+    deal_notes: `Analyzed via Deal Analyzer. Terminal cap: ${termCap}%, Hold: ${termMonths/12}yr, Escalation: ${escPct}%/yr. Duration @ BTIRR: ${durBtirr ? durBtirr.toFixed(2) : '—'}yr; @ 7% market: ${durMarket ? durMarket.toFixed(2) : '—'}yr.`
   };
 
   const res = await supabasePost('deals', body);
   if (res.ok || res.status === 201) {
-    showToast('Saved to database as Prospected Deal', 'success');
+    showToast('Saved to database with duration', 'success');
     window.dealsLoaded = false;
   } else {
     showToast('Error saving — check deal name and city fields', 'error');
@@ -1847,6 +1925,67 @@ function showToast(msg, type) {
   t.className = 'toast show ' + type;
   setTimeout(() => t.className = 'toast', 3000);
 }
+
+// ─── DURATION BACKFILL — one-time recalculation for existing deals ──
+// Run once via browser console: backfillDurations()
+// Recalculates duration_btirr and duration_market for every deal that has
+// the inputs (purchase_price, annual_noi) and writes back to Supabase.
+//
+window.backfillDurations = async function () {
+  console.log('[backfill] starting…');
+  const all = await supabase('deals', 'select=*');
+  console.log(`[backfill] loaded ${all.length} deals`);
+
+  const DEFAULTS = {
+    termMonths: 84,        // 7 yr default hold
+    escPct: 2.5,           // 2.5% annual rent escalation
+    termCap: 7,            // 7% exit cap
+    commission: 3,
+    landRatio: 0.3         // 30% of price as land
+  };
+
+  let updated = 0, skipped = 0, errored = 0;
+
+  for (const d of all) {
+    if (!d.purchase_price || !d.annual_noi || d.purchase_price <= 0 || d.annual_noi <= 0) {
+      skipped++;
+      continue;
+    }
+    try {
+      const landVal = d.purchase_price * DEFAULTS.landRatio;
+      const btFlows = buildCashflows(
+        d.purchase_price, d.annual_noi, DEFAULTS.termMonths, DEFAULTS.escPct,
+        0, DEFAULTS.termCap, DEFAULTS.commission, landVal, 0, 48, 35, false
+      );
+      const btirr = calcIRR(btFlows.annual);
+      const durBtirr  = btirr ? calcMacaulayDuration(btFlows.annual, btirr) : null;
+      const durMarket = calcMacaulayDuration(btFlows.annual, MARKET_DISCOUNT_RATE);
+
+      const patch = {
+        duration_btirr:  durBtirr  ? +durBtirr.toFixed(2)  : null,
+        duration_market: durMarket ? +durMarket.toFixed(2) : null,
+        duration_calc_date: new Date().toISOString()
+      };
+
+      const r = await supabasePatch('deals', `deal_id=eq.${d.deal_id}`, patch);
+      if (r.ok || r.status === 204) {
+        console.log(`[backfill] ✓ ${d.deal_name}: BTIRR ${durBtirr ? durBtirr.toFixed(2) : '—'}yr / market ${durMarket ? durMarket.toFixed(2) : '—'}yr`);
+        updated++;
+      } else {
+        console.warn(`[backfill] ✗ ${d.deal_name}: HTTP ${r.status}`);
+        errored++;
+      }
+    } catch (e) {
+      console.error(`[backfill] ✗ ${d.deal_name}:`, e);
+      errored++;
+    }
+  }
+
+  console.log(`[backfill] done — updated ${updated}, skipped ${skipped}, errored ${errored}`);
+  showToast(`Backfill complete: ${updated} updated, ${skipped} skipped`, 'success');
+  window.dealsLoaded = false;
+  loadDashboard();
+};
 </script>
 </body>
 </html>
