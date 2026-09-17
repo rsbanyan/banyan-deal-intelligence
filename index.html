@@ -1,4 +1,5 @@
 
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -836,9 +837,12 @@ tbody td {
 <div id="pw-screen">
   <div class="pw-logo">Banyan <span>Deal Intelligence</span></div>
   <div class="pw-box">
-    <div class="pw-label">Access Code</div>
-    <input class="pw-input" type="password" id="pw-input" placeholder="Enter password" autocomplete="off">
-    <button class="pw-btn" onclick="checkPassword()">Enter</button>
+    <div class="pw-label">Email</div>
+    <input class="pw-input" type="email" id="pw-email" placeholder="you@example.com"
+           autocomplete="username" style="margin-bottom:10px">
+    <div class="pw-label">Password</div>
+    <input class="pw-input" type="password" id="pw-input" placeholder="Password" autocomplete="current-password">
+    <button class="pw-btn" onclick="checkPassword()">Sign In</button>
     <div class="pw-error" id="pw-error"></div>
   </div>
 </div>
@@ -860,6 +864,9 @@ tbody td {
         <option value="Banyan">Banyan</option>
         <option value="SRE">SRE</option>
         <option value="Chase">Chase</option>
+        <option value="Banyan Prospected">Banyan Prospected</option>
+        <option value="Market">Market</option>
+        <option value="Other">Other</option>
         <option value="__ALL__">All portfolios</option>
       </select>
       <button class="add-deal-btn" onclick="showView('add-deal')">+ New Deal</button>
@@ -1243,14 +1250,74 @@ tbody td {
 <script>
 const SUPA_URL = 'https://lgjujubysmkmdkcpjuse.supabase.co/rest/v1';
 const SUPA_KEY = 'sb_publishable_p3PAuJUaJgR-ZcbkiD0dHA_7PJtqdyW';
-const PASSWORD = 'banyan2026';
+const SUPA_AUTH = SUPA_URL.replace('/rest/v1', '/auth/v1');
 const MARKET_DISCOUNT_RATE = 0.07; // 7% — institutional industrial benchmark
 
-const HEADERS = {
-  'apikey': SUPA_KEY,
-  'Authorization': 'Bearer ' + SUPA_KEY,
-  'Content-Type': 'application/json'
-};
+// ─── AUTH ──────────────────────────────────────────────────────
+// Real Supabase Auth. The old client-side PASSWORD constant is gone —
+// it was a string in public source and anyone could walk past it with
+// the browser console. The session token below is what satisfies the
+// RLS policies gating leases, tenants, snapshots and deals.
+const TOKEN_KEY = 'bdi_session';
+
+function getSession() {
+  try { return JSON.parse(localStorage.getItem(TOKEN_KEY) || 'null'); }
+  catch (e) { return null; }
+}
+
+function setSession(s) {
+  try {
+    if (s) localStorage.setItem(TOKEN_KEY, JSON.stringify(s));
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch (e) { /* private browsing — session lasts this tab only */ }
+  window.SESSION = s;
+}
+
+// Headers are a function now, not a constant: the bearer token changes
+// when you sign in, sign out, or refresh.
+function headers(extra = {}) {
+  const s = window.SESSION || getSession();
+  return {
+    'apikey': SUPA_KEY,
+    'Authorization': 'Bearer ' + (s && s.access_token ? s.access_token : SUPA_KEY),
+    'Content-Type': 'application/json',
+    ...extra
+  };
+}
+
+async function signIn(email, password) {
+  const res = await fetch(`${SUPA_AUTH}/token?grant_type=password`, {
+    method: 'POST',
+    headers: { 'apikey': SUPA_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password })
+  });
+  const data = await res.json();
+  if (!res.ok || !data.access_token) {
+    return { ok: false, message: (data && (data.error_description || data.msg || data.error)) || 'Sign in failed' };
+  }
+  setSession(data);
+  return { ok: true };
+}
+
+async function refreshSession() {
+  const s = getSession();
+  if (!s || !s.refresh_token) return false;
+  const res = await fetch(`${SUPA_AUTH}/token?grant_type=refresh_token`, {
+    method: 'POST',
+    headers: { 'apikey': SUPA_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh_token: s.refresh_token })
+  });
+  if (!res.ok) { setSession(null); return false; }
+  const data = await res.json();
+  if (!data.access_token) { setSession(null); return false; }
+  setSession(data);
+  return true;
+}
+
+function signOut() {
+  setSession(null);
+  location.reload();
+}
 
 // ─── PORTFOLIO SCOPE ───────────────────────────────────────────
 // Every deal carries deal_category. The dashboard used to hardcode
@@ -1274,46 +1341,88 @@ function switchPortfolio(value) {
   else { showView('dashboard'); loadDashboard(); }
 }
 
+// Every call goes through here. On a 401 the access token has expired,
+// so refresh once and retry before falling back to the login screen.
+async function apiFetch(url, opts = {}, extraHeaders = {}) {
+  let res = await fetch(url, { ...opts, headers: headers(extraHeaders) });
+  if (res.status === 401) {
+    const refreshed = await refreshSession();
+    if (refreshed) {
+      res = await fetch(url, { ...opts, headers: headers(extraHeaders) });
+    } else {
+      showLogin('Session expired — sign in again');
+    }
+  }
+  return res;
+}
+
 async function supabase(table, params = '') {
-  const res = await fetch(`${SUPA_URL}/${table}?${params}`, { headers: HEADERS });
+  const res = await apiFetch(`${SUPA_URL}/${table}?${params}`);
+  if (!res.ok) return [];
   return res.json();
 }
 
 async function supabasePost(table, body) {
-  const res = await fetch(`${SUPA_URL}/${table}`, {
+  return apiFetch(`${SUPA_URL}/${table}`, {
     method: 'POST',
-    headers: { ...HEADERS, 'Prefer': 'return=minimal' },
     body: JSON.stringify(body)
-  });
-  return res;
+  }, { 'Prefer': 'return=minimal' });
 }
 
 async function supabasePatch(table, params, body) {
-  const res = await fetch(`${SUPA_URL}/${table}?${params}`, {
+  return apiFetch(`${SUPA_URL}/${table}?${params}`, {
     method: 'PATCH',
-    headers: { ...HEADERS, 'Prefer': 'return=minimal' },
     body: JSON.stringify(body)
-  });
-  return res;
+  }, { 'Prefer': 'return=minimal' });
 }
 
 // PASSWORD
-function checkPassword() {
-  const val = document.getElementById('pw-input').value;
-  if (val === PASSWORD) {
-    document.getElementById('pw-screen').style.display = 'none';
-    document.getElementById('app').style.display = 'block';
-    loadDashboard();
-  } else {
-    document.getElementById('pw-error').textContent = 'Incorrect password';
+function showApp() {
+  document.getElementById('pw-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  loadDashboard();
+}
+
+function showLogin(message) {
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('pw-screen').style.display = 'flex';
+  if (message) document.getElementById('pw-error').textContent = message;
+}
+
+async function checkPassword() {
+  const email = document.getElementById('pw-email').value.trim();
+  const pass  = document.getElementById('pw-input').value;
+  const err   = document.getElementById('pw-error');
+
+  if (!email || !pass) { err.textContent = 'Email and password required'; return; }
+
+  err.textContent = 'Signing in…';
+  const out = await signIn(email, pass);
+  if (out.ok) {
+    err.textContent = '';
     document.getElementById('pw-input').value = '';
-    setTimeout(() => document.getElementById('pw-error').textContent = '', 2000);
+    showApp();
+  } else {
+    err.textContent = out.message;
+    document.getElementById('pw-input').value = '';
+    setTimeout(() => { if (err.textContent === out.message) err.textContent = ''; }, 4000);
   }
 }
 
-document.getElementById('pw-input').addEventListener('keydown', e => {
-  if (e.key === 'Enter') checkPassword();
+['pw-email','pw-input'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', e => {
+    if (e.key === 'Enter') checkPassword();
+  });
 });
+
+// Restore a saved session on load so you are not signing in every visit.
+(async function restoreSession() {
+  const s = getSession();
+  if (!s || !s.refresh_token) return;
+  window.SESSION = s;
+  if (await refreshSession()) showApp();
+  else setSession(null);
+})();
 
 // NAVIGATION
 function showView(view) {
@@ -1535,6 +1644,9 @@ async function showDeal(dealId) {
       </div>
     </div>
 
+    ${dealValueMatrix(deal)}
+    ${dealSinceAcquisition(deal)}
+
     ${deal.deal_notes ? `
     <div class="notes-card">
       <div class="detail-card-title">Notes & Strategy</div>
@@ -1561,6 +1673,75 @@ async function showDeal(dealId) {
       </div>
     </div>
   `;
+}
+
+// ─── OWNED-DEAL TABLES ─────────────────────────────────────────
+const VALUE_MATRIX_CAPS = [6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0];
+
+function dealValueMatrix(deal) {
+  const sf = deal.building_sf, noiInPlace = deal.annual_noi, mktPSF = deal.market_rent_psf;
+  if (!noiInPlace || !sf || !mktPSF) return '';
+  const noiMarket = sf * mktPSF;
+  const basis = deal.purchase_price;
+  const scenarios = [
+    { label: 'In place', noi: noiInPlace },
+    { label: 'Halfway to market', noi: (noiInPlace + noiMarket) / 2 },
+    { label: 'At market', noi: noiMarket }
+  ];
+  const cell = v => {
+    if (!basis) return { cls: '', txt: fmtM(v) };
+    const mult = v / basis;
+    return { cls: mult >= 1.35 ? 'good' : mult >= 1.0 ? 'ok' : 'bad', txt: fmtM(v) };
+  };
+  return `
+    <div class="detail-card" style="margin-bottom:16px">
+      <div class="detail-card-title">Value Matrix — implied value by exit cap and rent scenario</div>
+      <div style="overflow-x:auto">
+        <table class="sensitivity-table">
+          <thead><tr><th>Exit Cap &rarr;</th>
+            ${scenarios.map(sc => `<th>${sc.label}<br><span style="font-weight:400;opacity:.6">${fmtM(sc.noi)} NOI</span></th>`).join('')}
+          </tr></thead>
+          <tbody>
+            ${VALUE_MATRIX_CAPS.map(cap => `
+              <tr>
+                <td style="font-weight:600;color:var(--text2);text-align:left;font-family:'DM Mono',monospace">${cap.toFixed(1)}%</td>
+                ${scenarios.map(sc => { const c = cell(sc.noi / (cap/100)); return `<td class="${c.cls}">${c.txt}</td>`; }).join('')}
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:10px">
+        Against a basis of ${fmtM(basis)}. Green &ge; 1.35&times; basis, yellow &ge; 1.0&times;, red below basis.
+        &ldquo;At market&rdquo; assumes the space re-leases at ${fmtPSF(mktPSF)} NNN &mdash; the lease-event outcome, not today.
+      </div>
+    </div>`;
+}
+
+function dealSinceAcquisition(deal) {
+  const basis = deal.purchase_price, noi = deal.annual_noi;
+  if (!basis || !noi || !deal.settlement_date) return '';
+  const held = (Date.now() - new Date(deal.settlement_date).getTime()) / (365.25 * 24 * 3600 * 1000);
+  if (held <= 0) return '';
+  const valueAt7 = noi / 0.07;
+  const gain = valueAt7 - basis;
+  const annualized = Math.pow(valueAt7 / basis, 1 / held) - 1;
+  const yieldOnCost = noi / basis;
+  const row = (label, value, color, note) => `
+    <div class="detail-row">
+      <span class="detail-row-label">${label}${note ? `<br><span style="font-size:10.5px;opacity:.65">${note}</span>` : ''}</span>
+      <span class="detail-row-value"${color ? ` style="color:${color}"` : ''}>${value}</span>
+    </div>`;
+  return `
+    <div class="detail-card" style="margin-bottom:16px">
+      <div class="detail-card-title">Since Acquisition</div>
+      ${row('Held', held.toFixed(1) + ' yr', null, fmtDate(deal.settlement_date))}
+      ${row('Basis', fmtM(basis))}
+      ${row('Yield on cost', (yieldOnCost*100).toFixed(2) + '%', yieldOnCost >= 0.08 ? 'var(--green)' : 'var(--yellow)', 'In-place NOI over what you paid')}
+      ${row('Implied value @ 7%', fmtM(valueAt7), 'var(--green)')}
+      ${row('Unrealized gain', fmtM(gain), gain >= 0 ? 'var(--green)' : 'var(--red)')}
+      ${row('Annualized appreciation', (annualized*100).toFixed(2) + '%', annualized >= 0 ? 'var(--green)' : 'var(--red)', 'Value only. Excludes cash distributions.')}
+      ${deal.duration_market ? row('Rate sensitivity', '~' + deal.duration_market.toFixed(1) + '% per 100bps', 'var(--yellow)', 'Value change if discount rates move') : ''}
+    </div>`;
 }
 
 // ─── RENT GAP ──────────────────────────────────────────────────
