@@ -963,6 +963,10 @@ tbody td {
                 <div class="form-label">Deal Name</div>
                 <input class="form-input" id="a-name" placeholder="e.g. Oak Street Industrial" oninput="analyzeDebounce()">
               </div>
+              <div class="form-group">
+                <div class="form-label">City</div>
+                <input class="form-input" id="a-city" placeholder="e.g. Columbia SC">
+              </div>
             </div>
 
             <div class="form-row">
@@ -1002,8 +1006,25 @@ tbody td {
 
             <div class="form-row">
               <div class="form-group">
-                <div class="form-label">Annual Escalation (%)</div>
+                <div class="form-label">Escalation (%)</div>
                 <input class="form-input" type="number" id="a-esc" placeholder="2.0" step="0.1" oninput="analyzeDebounce()">
+              </div>
+              <div class="form-group">
+                <div class="form-label">Every (months)</div>
+                <select class="form-input" id="a-escfreq" onchange="analyzeDebounce()">
+                  <option value="12">12 — annual</option>
+                  <option value="60">60 — every 5 years</option>
+                  <option value="24">24 — every 2 years</option>
+                  <option value="36">36 — every 3 years</option>
+                  <option value="120">120 — every 10 years</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <div class="form-label">Exit Method</div>
+                <select class="form-input" id="a-exitmethod" onchange="analyzeDebounce()">
+                  <option value="cap">Cap terminal NOI</option>
+                  <option value="costbasis">Cost-basis appreciation</option>
+                </select>
               </div>
               <div class="form-group">
                 <div class="form-label">Free Rent (months)</div>
@@ -1369,6 +1390,10 @@ async function supabasePost(table, body) {
   }, { 'Prefer': 'return=minimal' });
 }
 
+async function supabaseDelete(table, params) {
+  return apiFetch(`${SUPA_URL}/${table}?${params}`, { method: 'DELETE' }, { 'Prefer': 'return=minimal' });
+}
+
 async function supabasePatch(table, params, body) {
   return apiFetch(`${SUPA_URL}/${table}?${params}`, {
     method: 'PATCH',
@@ -1608,7 +1633,34 @@ async function showDeal(dealId) {
         <div class="detail-title">${deal.deal_name}</div>
         <div class="detail-sub">${deal.address || ''} · ${deal.city}, ${deal.state} · ${deal.market || ''}</div>
       </div>
-      <button class="back-btn" onclick="showView('dashboard')">← Portfolio</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="back-btn" onclick="openEdit('${deal.deal_id}')">Edit</button>
+        <button class="back-btn" style="border-color:var(--red);color:var(--red)" onclick="confirmDelete('${deal.deal_id}', ${JSON.stringify(deal.deal_name)})">Delete</button>
+        <button class="back-btn" onclick="showView('dashboard')">← Portfolio</button>
+      </div>
+    </div>
+
+    <div id="edit-panel" style="display:none;background:var(--panel,#1a1a1a);border:1px solid var(--border,#333);border-radius:10px;padding:18px;margin-bottom:18px">
+      <div class="detail-card-title" style="margin-bottom:12px">Edit deal</div>
+      <div class="form-row">
+        <div class="form-group"><div class="form-label">Deal name</div><input class="form-input" id="e-deal_name"></div>
+        <div class="form-group"><div class="form-label">City</div><input class="form-input" id="e-city"></div>
+        <div class="form-group"><div class="form-label">State</div><input class="form-input" id="e-state"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><div class="form-label">Purchase price</div><input class="form-input" type="number" id="e-purchase_price"></div>
+        <div class="form-group"><div class="form-label">Annual NOI</div><input class="form-input" type="number" id="e-annual_noi"></div>
+        <div class="form-group"><div class="form-label">Building SF</div><input class="form-input" type="number" id="e-building_sf"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><div class="form-label">Rent PSF</div><input class="form-input" type="number" step="0.01" id="e-rent_psf"></div>
+        <div class="form-group"><div class="form-label">Market rent PSF</div><input class="form-input" type="number" step="0.01" id="e-market_rent_psf"></div>
+        <div class="form-group"><div class="form-label">Land acres</div><input class="form-input" type="number" step="0.01" id="e-land_acres"></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button class="submit-btn" onclick="saveEdit('${deal.deal_id}')">Save changes</button>
+        <button class="back-btn" onclick="closeEdit()">Cancel</button>
+      </div>
     </div>
 
     <div class="detail-grid">
@@ -1895,17 +1947,22 @@ function calcIRR(cashflows, guess = 0.05) {
   return isFinite(rate) && rate > -1 ? rate : null;
 }
 
-function buildCashflows(price, noi, termMonths, escPct, freeRentMonths, termCap, commission, landVal, improvements, incomeTax, cgTax, afterTax) {
-  const annualEsc = escPct / 100;
+function buildCashflows(price, noi, termMonths, escPct, freeRentMonths, termCap, commission, landVal, improvements, incomeTax, cgTax, afterTax, opts = {}) {
+  // escFreq = months between steps. 12 => annual compounding. 60 => 10% every 5 years.
+  const escFreq    = opts.escFreq    || 12;
+  const exitMethod = opts.exitMethod || 'cap';
+  const landApprec = (opts.landApprec != null ? opts.landApprec : 2.5) / 100;
+  const imprApprec = (opts.imprApprec != null ? opts.imprApprec : 2.5) / 100;
+  const stepPct    = escPct / 100;
 
   const monthly = [];
   let currentNOI = noi;
-  let yearCount = 0;
+  let stepCount = 0;
 
   for (let m = 1; m <= termMonths; m++) {
-    if (m > 1 && (m - 1) % 12 === 0) {
-      yearCount++;
-      currentNOI = noi * Math.pow(1 + annualEsc, yearCount);
+    if (m > 1 && (m - 1) % escFreq === 0) {
+      stepCount++;
+      currentNOI = noi * Math.pow(1 + stepPct, stepCount);
     }
     const monthlyNOI = m <= freeRentMonths ? 0 : currentNOI / 12;
 
@@ -1921,7 +1978,17 @@ function buildCashflows(price, noi, termMonths, escPct, freeRentMonths, termCap,
   }
 
   const terminalNOI = currentNOI;
-  const grossSalePrice = terminalNOI / (termCap / 100);
+  const years = termMonths / 12;
+
+  // Exit method A — cap the terminal in-place NOI (rewards rent growth)
+  const capExit = terminalNOI / (termCap / 100);
+
+  // Exit method B — compound land and improvements at their own rates (the Excel method, blind to rent)
+  const imprVal = improvements > 0 ? improvements : Math.max(price - landVal, 0);
+  const costBasisExit = (landVal * Math.pow(1 + landApprec, years))
+                      + (imprVal * Math.pow(1 + imprApprec, years));
+
+  const grossSalePrice = exitMethod === 'costbasis' ? costBasisExit : capExit;
   const netSalePrice = grossSalePrice * (1 - commission / 100);
 
   let saleProceeds;
@@ -1945,7 +2012,7 @@ function buildCashflows(price, noi, termMonths, escPct, freeRentMonths, termCap,
   }
   annual[annual.length - 1] += saleProceeds;
 
-  return { annual, grossSalePrice, netSalePrice, saleProceeds, terminalNOI };
+  return { annual, grossSalePrice, netSalePrice, saleProceeds, terminalNOI, capExit, costBasisExit };
 }
 
 function runAnalyzer() {
@@ -1955,6 +2022,9 @@ function runAnalyzer() {
   const noi         = getVal('a-noi', 0);
   const termMonths  = getVal('a-term', 60);
   const escPct      = getVal('a-esc', 2);
+  const escFreq     = parseInt((document.getElementById('a-escfreq')||{}).value || '12', 10);
+  const exitMethod  = (document.getElementById('a-exitmethod')||{}).value || 'cap';
+  const aOpts       = { escFreq, exitMethod };
   const freeRent    = getVal('a-freerent', 0);
   const mktPSF      = getVal('a-mktpsf', 0);
   const rentPSF     = getVal('a-rentpsf', 0);
@@ -1980,8 +2050,13 @@ function runAnalyzer() {
   const pricePSF = bsf > 0 ? (price / bsf).toFixed(2) : null;
   const rentToMkt = rentPSF > 0 && mktPSF > 0 ? (rentPSF / mktPSF * 100).toFixed(1) : null;
 
-  const btFlows = buildCashflows(price, noi, termMonths, escPct, freeRent, termCap, commission, landVal, improvements, incomeTax, cgTax, false);
-  const atFlows = buildCashflows(price, noi, termMonths, escPct, freeRent, termCap, commission, landVal, improvements, incomeTax, cgTax, true);
+  const btFlows = buildCashflows(price, noi, termMonths, escPct, freeRent, termCap, commission, landVal, improvements, incomeTax, cgTax, false, aOpts);
+  const atFlows = buildCashflows(price, noi, termMonths, escPct, freeRent, termCap, commission, landVal, improvements, incomeTax, cgTax, true, aOpts);
+
+  // Value matrix — both exits side by side; the SPREAD is the covered-land-play thesis
+  const vmCap  = btFlows.capExit;
+  const vmCost = btFlows.costBasisExit;
+  const vmSpread = (vmCap && vmCost) ? (vmCap / vmCost - 1) * 100 : null;
 
   const btirr = calcIRR(btFlows.annual);
   const atirr = calcIRR(atFlows.annual);
@@ -2009,7 +2084,7 @@ function runAnalyzer() {
   const senRows = capRates.map(cap => {
     const cells = holdPeriods.map(hold => {
       const holdMonths = hold * 12;
-      const { annual } = buildCashflows(price, noi, holdMonths, escPct, freeRent, cap, commission, landVal, improvements, incomeTax, cgTax, false);
+      const { annual } = buildCashflows(price, noi, holdMonths, escPct, freeRent, cap, commission, landVal, improvements, incomeTax, cgTax, false, aOpts);
       const irr = calcIRR(annual);
       const isBase = Math.abs(cap - termCap) < 0.01 && hold === Math.round(termYears);
       return { irr, isBase };
@@ -2017,7 +2092,29 @@ function runAnalyzer() {
     return { cap, cells };
   });
 
+  const fmtM = v => v == null ? '&mdash;' : '$' + (v/1e6).toFixed(2) + 'M';
   const html = `
+    <div class="result-card">
+      <div class="result-card-title">Value Matrix &mdash; both exits</div>
+      <div class="result-kpis">
+        <div class="result-kpi">
+          <div class="result-kpi-label">Cap-rate exit</div>
+          <div class="result-kpi-value accent">${fmtM(vmCap)}</div>
+          <div class="result-kpi-sub">terminal NOI &divide; ${termCap}%</div>
+        </div>
+        <div class="result-kpi">
+          <div class="result-kpi-label">Cost-basis exit</div>
+          <div class="result-kpi-value accent">${fmtM(vmCost)}</div>
+          <div class="result-kpi-sub">land + improvements compounded</div>
+        </div>
+        <div class="result-kpi">
+          <div class="result-kpi-label">Spread</div>
+          <div class="result-kpi-value ${vmSpread != null && Math.abs(vmSpread) > 15 ? 'yellow' : ''}">${vmSpread == null ? '&mdash;' : (vmSpread>0?'+':'') + vmSpread.toFixed(1) + '%'}</div>
+          <div class="result-kpi-sub">${vmSpread == null ? '' : Math.abs(vmSpread) > 15 ? 'mark-to-market play' : 'works on cost alone'}</div>
+        </div>
+      </div>
+      <div style="font-size:12px;opacity:.6;margin-top:8px">Returns below use the <strong>${exitMethod === 'costbasis' ? 'cost-basis' : 'cap-rate'}</strong> exit. Wide spread means the return depends on the lease event landing.</div>
+    </div>
     <div class="result-card">
       <div class="result-card-title">Returns Summary</div>
       <div class="result-kpis">
@@ -2127,8 +2224,12 @@ async function saveToDB() {
   const incomeTax = getVal('a-incometax', 48);
   const cgTax = getVal('a-cgtax', 35);
 
-  const atFlows = buildCashflows(price, noi, termMonths, escPct, freeRent, termCap, commission, landVal, 0, incomeTax, cgTax, true);
-  const btFlows = buildCashflows(price, noi, termMonths, escPct, freeRent, termCap, commission, landVal, 0, incomeTax, cgTax, false);
+  const escFreq    = parseInt((document.getElementById('a-escfreq')||{}).value || '12', 10);
+  const exitMethod = (document.getElementById('a-exitmethod')||{}).value || 'cap';
+  const sOpts = { escFreq, exitMethod };
+
+  const atFlows = buildCashflows(price, noi, termMonths, escPct, freeRent, termCap, commission, landVal, 0, incomeTax, cgTax, true, sOpts);
+  const btFlows = buildCashflows(price, noi, termMonths, escPct, freeRent, termCap, commission, landVal, 0, incomeTax, cgTax, false, sOpts);
   const atirr = calcIRR(atFlows.annual);
   const btirr = calcIRR(btFlows.annual);
   const durBtirr  = btirr ? calcMacaulayDuration(btFlows.annual, btirr) : null;
@@ -2140,7 +2241,7 @@ async function saveToDB() {
     deal_type: 'Industrial',
     status: 'Prospected',
     data_completeness: 'Partial',
-    city: document.getElementById('a-name').value,
+    city: (document.getElementById('a-city') || {}).value || null,
     purchase_price: price || null,
     banyan_equity: getVal('a-equity') || null,
     building_sf: getVal('a-bsf') || null,
@@ -2149,18 +2250,18 @@ async function saveToDB() {
     annual_noi: noi || null,
     rent_psf: getVal('a-rentpsf') || null,
     market_rent_psf: getVal('a-mktpsf') || null,
-    atirr: atirr ? +(atirr*100).toFixed(2) : null,
-    btirr: btirr ? +(btirr*100).toFixed(2) : null,
-    duration_btirr:  durBtirr  ? +durBtirr.toFixed(2)  : null,
-    duration_market: durMarket ? +durMarket.toFixed(2) : null,
-    duration_calc_date: new Date().toISOString(),
+    // NOTE: atirr / btirr / duration_* are deliberately NOT written here.
+    // The Analyzer is a quick-look tool — two depreciation buckets instead of four,
+    // no 1031 probability — so its IRRs are not comparable to the Excel-derived
+    // numbers in those columns. Mixing them makes the canonical columns meaningless.
+    // Approximate results go in deal_notes instead, clearly labelled.
     est_value_high: btFlows.grossSalePrice || null,
-    deal_notes: `Analyzed via Deal Analyzer. Terminal cap: ${termCap}%, Hold: ${termMonths/12}yr, Escalation: ${escPct}%/yr. Duration @ BTIRR: ${durBtirr ? durBtirr.toFixed(2) : '—'}yr; @ 7% market: ${durMarket ? durMarket.toFixed(2) : '—'}yr.`
+    deal_notes: `[ANALYZER — APPROXIMATE, not canonical] Terminal cap ${termCap}%, hold ${termMonths/12}yr, escalation ${escPct}% every ${escFreq}mo, exit method ${exitMethod === 'costbasis' ? 'cost-basis' : 'cap-rate'}. Approx BTIRR ${btirr ? (btirr*100).toFixed(2)+'%' : '—'}, approx ATIRR ${atirr ? (atirr*100).toFixed(2)+'%' : '—'}, duration @BTIRR ${durBtirr ? durBtirr.toFixed(2)+'yr' : '—'}, @7% ${durMarket ? durMarket.toFixed(2)+'yr' : '—'}. Re-run in the Excel model before treating these as final.`
   };
 
   const res = await supabasePost('deals', body);
   if (res.ok || res.status === 201) {
-    showToast('Saved to database with duration', 'success');
+    showToast('Saved as Prospected — IRRs kept in notes, not canonical columns', 'success');
     window.dealsLoaded = false;
   } else {
     showToast('Error saving — check deal name and city fields', 'error');
@@ -2169,8 +2270,8 @@ async function saveToDB() {
 
 // ─── FREEZE UNDERWRITING ───────────────────────────────────────
 const ANALYZER_INPUT_IDS = [
-  'a-name','a-price','a-equity','a-bsf','a-acres','a-noi','a-term','a-esc',
-  'a-freerent','a-mktpsf','a-rentpsf','a-termcap','a-commission',
+  'a-name','a-city','a-price','a-equity','a-bsf','a-acres','a-noi','a-term','a-esc',
+  'a-escfreq','a-exitmethod','a-freerent','a-mktpsf','a-rentpsf','a-termcap','a-commission',
   'a-incometax','a-cgtax','a-landval','a-improvements'
 ];
 const ENGINE_VERSION = 'npv-solve-2026.09';
@@ -2221,6 +2322,73 @@ async function freezeUnderwriting() {
     showToast('This deal already has an acquisition freeze', 'error');
   } else {
     showToast('Freeze failed — check RLS insert policy', 'error');
+  }
+}
+
+// ─── EDIT / DELETE ─────────────────────────────────────────────
+const EDIT_FIELDS = ['deal_name','city','state','purchase_price','annual_noi',
+                     'building_sf','rent_psf','market_rent_psf','land_acres'];
+const EDIT_NUMERIC = ['purchase_price','annual_noi','building_sf','rent_psf','market_rent_psf','land_acres'];
+
+function openEdit(dealId) {
+  const deal = (window.allDeals || []).find(d => String(d.deal_id) === String(dealId));
+  if (!deal) { showToast('Could not find that deal', 'error'); return; }
+  EDIT_FIELDS.forEach(f => {
+    const el = document.getElementById('e-' + f);
+    if (el) el.value = deal[f] != null ? deal[f] : '';
+  });
+  const panel = document.getElementById('edit-panel');
+  if (panel) { panel.style.display = 'block'; panel.scrollIntoView({behavior:'smooth', block:'nearest'}); }
+}
+
+function closeEdit() {
+  const panel = document.getElementById('edit-panel');
+  if (panel) panel.style.display = 'none';
+}
+
+async function saveEdit(dealId) {
+  const patch = {};
+  EDIT_FIELDS.forEach(f => {
+    const el = document.getElementById('e-' + f);
+    if (!el) return;
+    let v = el.value;
+    if (typeof v === 'string') v = v.trim();          // trailing spaces have bitten us before
+    if (v === '') { patch[f] = null; return; }
+    patch[f] = EDIT_NUMERIC.includes(f) ? (parseFloat(v) || null) : v;
+  });
+  if (!patch.deal_name) { showToast('Deal name cannot be empty', 'error'); return; }
+
+  const res = await supabasePatch('deals', `deal_id=eq.${encodeURIComponent(dealId)}`, patch);
+  if (res.ok || res.status === 204) {
+    showToast('Saved', 'success');
+    closeEdit();
+    window.dealsLoaded = false;
+    if (typeof loadDashboard === 'function') await loadDashboard();
+    if (typeof showDeal === 'function') showDeal(dealId);
+  } else {
+    showToast('Save failed — check the values and try again', 'error');
+  }
+}
+
+function confirmDelete(dealId, dealName) {
+  const ok = window.confirm(
+    'Delete "' + dealName + '"?\n\n' +
+    'This permanently removes the deal row. Frozen snapshots in deal_snapshots are NOT deleted.\n\n' +
+    'This cannot be undone.'
+  );
+  if (ok) doDelete(dealId);
+}
+
+async function doDelete(dealId) {
+  // delete by deal_id, never by name — names carry trailing spaces and match zero rows
+  const res = await supabaseDelete('deals', `deal_id=eq.${encodeURIComponent(dealId)}`);
+  if (res.ok || res.status === 204) {
+    showToast('Deal deleted', 'success');
+    window.dealsLoaded = false;
+    if (typeof loadDashboard === 'function') await loadDashboard();
+    showView('dashboard');
+  } else {
+    showToast('Delete failed — you may not have permission on this row', 'error');
   }
 }
 
