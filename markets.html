@@ -58,6 +58,36 @@ svg.spark{display:block}
 .err{color:var(--down);font-family:var(--f-data);font-size:12px}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media (max-width:640px){#basket th:nth-child(2),#basket td.nm,#basket th:nth-child(4),#basket tr:not(.grp) td:nth-child(4),#basket th:nth-child(9),#basket tr:not(.grp) td:nth-child(9){display:none}td,th{padding:6px 5px}}
+
+/* compare section */
+.s1{--bar:#c3ccd0;--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s4:#eda100;--s5:#e87ba4;--s6:#008300}
+@media (prefers-color-scheme: dark){.s1{--bar:#3a464c;--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--s5:#d55181;--s6:#008300}}
+.ctrl{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:12px}
+.ctrl .lab{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-right:4px}
+.ctrl button{font:inherit;font-size:13px;color:var(--fg);background:transparent;border:1px solid var(--line);border-radius:4px;padding:4px 10px;cursor:pointer}
+.ctrl button[aria-pressed="true"]{background:var(--fg);color:var(--panel);border-color:var(--fg)}
+.ctrl button:hover:not([aria-pressed="true"]){background:var(--hover)}
+.cgrid{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:18px}
+@media (max-width:860px){.cgrid{grid-template-columns:minmax(0,1fr)}}
+.ctitle{font-size:14px;font-weight:600;margin:0 0 2px}
+.cnote{font-size:12px;color:var(--muted);margin:0 0 8px}
+.chart{position:relative}
+.chart svg{display:block;width:100%;height:auto;overflow:visible}
+.ax{font:11px var(--f-data);fill:var(--muted)}
+.grid{stroke:var(--line);stroke-width:1}
+.zero{stroke:var(--muted);stroke-width:1}
+.bench{stroke:var(--fg);stroke-width:1;stroke-dasharray:3 3}
+.blab{font:12px var(--f-data);fill:var(--fg)}
+.bval{font:11px var(--f-data);fill:var(--muted)}
+.brow{cursor:pointer}
+.brow:hover .bhit{fill:var(--hover)}
+.brow.on .blab{font-weight:600}
+.legend2{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;margin:0 0 8px}
+.legend2 span{display:inline-flex;align-items:center;gap:6px}
+.legend2 i{width:14px;height:3px;border-radius:2px;display:inline-block}
+.legend2 button{border:0;background:none;color:var(--muted);cursor:pointer;font:inherit;padding:0 2px}
+.ctip{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:7px 9px;font:12px var(--f-data);box-shadow:0 4px 14px rgba(0,0,0,.16);z-index:3;white-space:nowrap}
+.ctip b{font-family:var(--f-body)}
 </style>
 </head>
 <body>
@@ -72,6 +102,25 @@ svg.spark{display:block}
       <nav><a href="./">← Deal Intelligence</a></nav>
     </div>
   </header>
+
+
+  <section class="panel s1" id="compare">
+    <h2>Head to head</h2>
+    <div class="ctrl" id="periods" role="group" aria-label="Period"><span class="lab">Period</span></div>
+    <div class="cgrid">
+      <div>
+        <p class="ctitle">Total return, ranked</p>
+        <p class="cnote">Dashed line is the S&amp;P 500 (VOO). Colored bars are on the growth chart; click any bar to add or remove it.</p>
+        <div class="chart" id="bars"></div>
+      </div>
+      <div>
+        <p class="ctitle">Growth of $100</p>
+        <p class="cnote">Each line starts at $100 on the first day of the period, dividends included.</p>
+        <div class="legend2" id="leg"></div>
+        <div class="chart" id="lines"></div>
+      </div>
+    </div>
+  </section>
 
   <section class="panel">
     <h2>The basket</h2>
@@ -175,9 +224,111 @@ function renderMacro(macro){
   }).join("");
 }
 
+
+// ---------- Head to head ----------
+let ASSETS=[], PERIOD="1y", PICKS=[], SLOT={};
+const PERIODS=[["1m","1M",30],["3m","3M",91],["ytd","YTD",null],["1y","1Y",365],["3y","3Y",1095],["5y","5Y",1825]];
+const GCOL={Core:"var(--s1)",Safety:"var(--s2)",Themes:"var(--s3)",Crypto:"var(--s4)"};
+const NS="http://www.w3.org/2000/svg";
+function latestDate(){return ASSETS.reduce((m,a)=>{const d=a.series[a.series.length-1][0];return d>m?d:m},"")}
+function startDate(){const end=latestDate(),p=PERIODS.find(x=>x[0]===PERIOD);return p[2]?shift(end,p[2]):(+end.slice(0,4)-1)+"-12-31"}
+function periodReturn(a,start){const b=valueOnOrBefore(a.series,start);if(!b||a.series[0][0]>start)return null;return a.series[a.series.length-1][1]/b[1]-1}
+function ticks(min,max,n){const span=max-min||1,step0=span/n,mag=Math.pow(10,Math.floor(Math.log10(step0))),err=step0/mag,step=(err>=7.5?10:err>=3.5?5:err>=1.5?2:1)*mag;const out=[];for(let v=Math.ceil(min/step)*step;v<=max+1e-9;v+=step)out.push(+v.toFixed(10));return out}
+
+function drawBars(){
+  const start=startDate(), el=document.getElementById("bars");
+  const rows=ASSETS.map(a=>({a,r:periodReturn(a,start)})).filter(x=>x.r!=null).sort((x,y)=>y.r-x.r);
+  const bench=rows.find(x=>x.a.symbol==="VOO");
+  const W=460,rh=19,top=22,L=50,R=62,H=top+rows.length*rh+6;
+  const mn=Math.min(0,...rows.map(x=>x.r)),mx=Math.max(0,...rows.map(x=>x.r));
+  const x=v=>L+(v-mn)/(mx-mn||1)*(W-L-R);
+  let g=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Ranked total return bar chart">`;
+  for(const t of ticks(mn,mx,4)){g+=`<line class="grid" x1="${x(t)}" x2="${x(t)}" y1="${top-4}" y2="${H-4}"/><text class="ax" x="${x(t)}" y="${top-9}" text-anchor="middle">${(t*100).toFixed(0)}%</text>`}
+  rows.forEach((d,i)=>{const y=top+i*rh,x0=x(0),x1=x(d.r),on=PICKS.includes(d.a.symbol);
+    const bx=Math.min(x0,x1),bw=Math.max(1,Math.abs(x1-x0));
+    g+=`<g class="brow${on?" on":""}" data-s="${esc(d.a.symbol)}" tabindex="0" role="button" aria-pressed="${on}" aria-label="${esc(d.a.symbol)} ${pct(d.r)}">
+      <rect class="bhit" x="0" y="${y}" width="${W}" height="${rh}" fill="transparent"/>
+      <rect x="${bx}" y="${y+4}" width="${bw}" height="${rh-8}" rx="2" fill="${on?`var(--s${SLOT[d.a.symbol]})`:"var(--bar)"}"/>
+      <text class="blab" x="${L-6}" y="${y+rh/2+4}" text-anchor="end">${esc(d.a.symbol)}</text>
+      <text class="bval" x="${W-2}" y="${y+rh/2+4}" text-anchor="end"${on?' style="fill:var(--fg)"':""}>${pct(d.r)}</text></g>`});
+  g+=`<line class="zero" x1="${x(0)}" x2="${x(0)}" y1="${top-4}" y2="${H-4}"/>`;
+  if(bench) g+=`<line class="bench" x1="${x(bench.r)}" x2="${x(bench.r)}" y1="${top-4}" y2="${H-4}"><title>S&amp;P 500 ${pct(bench.r)}</title></line>`;
+  g+=`</svg>`;
+  const key=Object.entries(GCOL).map(([k,c])=>`<span><i style="background:${c};height:10px;width:10px;border-radius:2px"></i>${k}</span>`).join("");
+  el.innerHTML=g+`<div class="ctip" hidden></div>`;
+  const tip=el.querySelector(".ctip");
+  el.querySelectorAll(".brow").forEach(n=>{
+    const sym=n.dataset.s, a=ASSETS.find(z=>z.symbol===sym), b=valueOnOrBefore(a.series,start), last=a.series[a.series.length-1];
+    n.addEventListener("click",()=>togglePick(sym));
+    n.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();togglePick(sym)}});
+    n.addEventListener("mousemove",e=>{const r=el.getBoundingClientRect();tip.hidden=false;
+      tip.innerHTML=`<b>${esc(a.name)}</b><br>${num(b[1],b[1]>=1000?0:2)} → ${num(last[1],last[1]>=1000?0:2)} · ${pct(last[1]/b[1]-1)}${bench?`<br>vs S&amp;P: ${((last[1]/b[1]-1-bench.r)*100>0?"+":"")+((last[1]/b[1]-1-bench.r)*100).toFixed(1)} pts`:""}`;
+      let lx=e.clientX-r.left+12; if(lx+tip.offsetWidth>r.width) lx=e.clientX-r.left-tip.offsetWidth-12;
+      tip.style.left=Math.max(0,lx)+"px";tip.style.top=(e.clientY-r.top+12)+"px"});
+    n.addEventListener("mouseleave",()=>tip.hidden=true);
+  });
+}
+
+function togglePick(sym){
+  if(PICKS.includes(sym)){PICKS=PICKS.filter(s=>s!==sym);delete SLOT[sym]}
+  else{ if(PICKS.length>=6){const out=PICKS.shift();delete SLOT[out]}
+    const used=new Set(Object.values(SLOT)); SLOT[sym]=[1,2,3,4,5,6].find(n=>!used.has(n)); PICKS.push(sym)}
+  try{localStorage.setItem("mb-picks",JSON.stringify(PICKS))}catch(e){}
+  drawBars();drawLines();
+}
+
+function drawLines(){
+  const start=startDate(), el=document.getElementById("lines"), leg=document.getElementById("leg");
+  const sel=PICKS.map(s=>ASSETS.find(a=>a.symbol===s)).filter(Boolean);
+  leg.innerHTML=sel.map(a=>`<span><i style="background:var(--s${SLOT[a.symbol]})"></i>${esc(a.symbol)} <button aria-label="Remove ${esc(a.symbol)}" data-s="${esc(a.symbol)}">×</button></span>`).join("")||`<span style="color:var(--muted)">Click bars on the left to compare.</span>`;
+  leg.querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>togglePick(b.dataset.s)));
+  const lines=sel.map(a=>{const b=valueOnOrBefore(a.series,start);if(!b)return null;
+    return {a,pts:[[start,100],...a.series.filter(r=>r[0]>start).map(r=>[r[0],r[1]/b[1]*100])]}}).filter(Boolean);
+  const W=640,H=400,L=46,R=64,T=10,B=26;
+  if(!lines.length){el.innerHTML=`<svg viewBox="0 0 ${W} ${H}"></svg>`;return}
+  const end=latestDate(), t0=Date.parse(start), t1=Date.parse(end);
+  const all=lines.flatMap(l=>l.pts.map(p=>p[1])); let mn=Math.min(100,...all), mx=Math.max(100,...all); const pad=(mx-mn)*.06||5; mn-=pad; mx+=pad;
+  const X=d=>L+(Date.parse(d)-t0)/(t1-t0||1)*(W-L-R), Y=v=>T+(mx-v)/(mx-mn)*(H-T-B);
+  let g=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Growth of 100 dollars line chart">`;
+  for(const t of ticks(mn,mx,5)) g+=`<line class="grid" x1="${L}" x2="${W-R}" y1="${Y(t)}" y2="${Y(t)}"/><text class="ax" x="${L-6}" y="${Y(t)+4}" text-anchor="end">$${t}</text>`;
+  g+=`<line class="zero" x1="${L}" x2="${W-R}" y1="${Y(100)}" y2="${Y(100)}"/>`;
+  const span=(t1-t0)/864e5, fmtD=d=>new Date(d+"T00:00:00Z").toLocaleDateString("en-US",span>500?{month:"short",year:"numeric",timeZone:"UTC"}:{month:"short",day:"numeric",timeZone:"UTC"});
+  for(let i=0;i<=4;i++){const d=new Date(t0+(t1-t0)*i/4).toISOString().slice(0,10);g+=`<text class="ax" x="${X(d)}" y="${H-8}" text-anchor="${i===0?"start":i===4?"end":"middle"}">${fmtD(d)}</text>`}
+  // end labels, nudged apart
+  const ends=lines.map(l=>({l,y:Y(l.pts[l.pts.length-1][1])})).sort((a,b)=>a.y-b.y);
+  for(let i=1;i<ends.length;i++) if(ends[i].y-ends[i-1].y<13) ends[i].y=ends[i-1].y+13;
+  for(const l of lines){const d=l.pts.map((p,i)=>(i?"L":"M")+X(p[0]).toFixed(1)+" "+Y(p[1]).toFixed(1)).join("");
+    g+=`<path d="${d}" fill="none" stroke="var(--s${SLOT[l.a.symbol]})" stroke-width="2" stroke-linejoin="round"/>`}
+  for(const e of ends){const last=e.l.pts[e.l.pts.length-1];
+    g+=`<circle cx="${X(last[0])}" cy="${Y(last[1])}" r="3.5" fill="var(--s${SLOT[e.l.a.symbol]})" stroke="var(--panel)" stroke-width="2"/>
+       <text class="blab" x="${W-R+8}" y="${e.y+4}">${esc(e.l.a.symbol)} $${Math.round(last[1])}</text>`}
+  g+=`<line id="xh" class="zero" y1="${T}" y2="${H-B}" x1="-10" x2="-10" style="display:none"/><rect id="hit" x="${L}" y="${T}" width="${W-L-R}" height="${H-T-B}" fill="transparent"/></svg><div class="ctip" hidden></div>`;
+  el.innerHTML=g;
+  const svgEl=el.querySelector("svg"), tip=el.querySelector(".ctip"), xh=el.querySelector("#xh");
+  svgEl.querySelector("#hit").addEventListener("mousemove",e=>{
+    const r=svgEl.getBoundingClientRect(), sx=(e.clientX-r.left)/r.width*W, d=new Date(t0+(sx-L)/(W-L-R)*(t1-t0)).toISOString().slice(0,10);
+    xh.setAttribute("x1",sx);xh.setAttribute("x2",sx);xh.style.display="";
+    const vals=lines.map(l=>{const p=valueOnOrBefore(l.pts,d);return {s:l.a.symbol,v:p?p[1]:null,c:SLOT[l.a.symbol]}}).sort((a,b)=>(b.v||0)-(a.v||0));
+    tip.hidden=false; tip.innerHTML=`<b>${fmtD(d)}</b><br>`+vals.map(v=>`<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--s${v.c});margin-right:5px"></span>${esc(v.s)} $${v.v==null?"–":v.v.toFixed(0)}`).join("<br>");
+    const er=el.getBoundingClientRect(); let lx=e.clientX-er.left+14; if(lx+tip.offsetWidth>er.width) lx=e.clientX-er.left-tip.offsetWidth-14;
+    tip.style.left=Math.max(0,lx)+"px"; tip.style.top=Math.max(0,e.clientY-er.top-tip.offsetHeight/2)+"px"});
+  svgEl.querySelector("#hit").addEventListener("mouseleave",()=>{tip.hidden=true;xh.style.display="none"});
+}
+
+function initCompare(assets){
+  ASSETS=assets;
+  let saved=null; try{saved=JSON.parse(localStorage.getItem("mb-picks")||"null")}catch(e){}
+  (Array.isArray(saved)&&saved.length?saved:["VOO","BRK.B","QQQ","GLD","TLT","BTC"]).filter(s=>assets.some(a=>a.symbol===s)).slice(0,6).forEach(s=>togglePickQuiet(s));
+  const pc=document.getElementById("periods");
+  PERIODS.forEach(([k,lab])=>{const b=document.createElement("button");b.textContent=lab;b.dataset.k=k;b.setAttribute("aria-pressed",k===PERIOD);
+    b.addEventListener("click",()=>{PERIOD=k;pc.querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed",x.dataset.k===k));drawBars();drawLines()});pc.appendChild(b)});
+  drawBars();drawLines();
+}
+function togglePickQuiet(sym){const used=new Set(Object.values(SLOT));SLOT[sym]=[1,2,3,4,5,6].find(n=>!used.has(n));PICKS.push(sym)}
+
 fetch("data/market.json",{cache:"no-store"}).then(r=>{if(!r.ok)throw new Error(r.status);return r.json()}).then(data=>{
   ROWS=data.assets.map(a=>({group:a.group,symbol:a.symbol,name:a.name,...stats(a.series),spark:spark(a.series,365)}));
-  renderBasket(); renderMacro(data.macro||[]);
+  renderBasket(); renderMacro(data.macro||[]); initCompare(data.assets);
   const upd=new Date(data.updated.replace("Z",":00Z")), ageDays=(Date.now()-upd)/864e5;
   document.getElementById("fresh").innerHTML=`Updated ${upd.toLocaleString("en-US",{dateStyle:"medium",timeStyle:"short"})} <span class="pill ${ageDays>4?"stale":"ok"}">${ageDays>4?"Stale":"Current"}</span>`;
   if(data.errors&&data.errors.length) document.getElementById("errs").textContent="Missing from the last run: "+data.errors.join(" · ");
