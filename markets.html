@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Banyan Markets Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one scrolling board. Header with freshness, the basket as a dense sortable table, the macro strip as small multiples */
+:root{
+  --bg:#f1f3f2; --panel:#ffffff; --fg:#1b2427; --muted:#5d6a6f; --line:#d8dddd; --hover:#e8ecec; --accent:#245f7d;
+  --up:#1b7a55; --down:#b2382f; --flat:#7b878b; --spark:#245f7d; --sparkfill:rgba(36,95,125,.10);
+  --f-display:"Barlow Condensed","Arial Narrow",Arial,sans-serif;
+  --f-body:"Source Sans 3","Segoe UI",system-ui,sans-serif;
+  --f-data:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#101518; --panel:#182024; --fg:#e2e8ea; --muted:#93a1a6; --line:#29343a; --hover:#212a2f; --accent:#6fb6d6;
+  --up:#45c08f; --down:#ec6a5f; --flat:#8b989c; --spark:#6fb6d6; --sparkfill:rgba(111,182,214,.12); color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font:15px/1.45 var(--f-body);padding:20px max(16px,env(safe-area-inset-right)) 40px max(16px,env(safe-area-inset-left))}
+.wrap{max-width:1240px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+header{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:10px 24px;border-bottom:2px solid var(--fg);padding-bottom:10px}
+h1{font:700 clamp(30px,4vw,44px)/1 var(--f-display);text-transform:uppercase;letter-spacing:.01em;margin:0}
+.sub{color:var(--muted);margin:6px 0 0;max-width:60ch}
+.fresh{font-family:var(--f-data);font-size:12px;display:flex;align-items:center;gap:8px;color:var(--muted)}
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;border:1px solid currentColor}
+.pill.ok{color:var(--up)} .pill.stale{color:var(--down)}
+nav a{color:var(--accent);font-size:14px}
+h2{font:600 15px var(--f-display);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px 16px;min-width:0}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th{font:600 11px var(--f-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);text-align:right;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap;cursor:pointer;user-select:none}
+th:first-child,th:nth-child(2){text-align:left}
+th[aria-sort]::after{content:" ▾";color:var(--accent)} th[aria-sort="ascending"]::after{content:" ▴"}
+td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:right;font-family:var(--f-data);font-size:13px;white-space:nowrap}
+td.sym{text-align:left;font-weight:500}
+td.nm{text-align:left;font-family:var(--f-body);font-size:14px;color:var(--muted);white-space:normal;min-width:150px}
+tr.grp td{background:var(--bg);font:600 12px var(--f-body);letter-spacing:.1em;text-transform:uppercase;color:var(--fg);text-align:left;padding-top:10px}
+tbody tr:not(.grp):hover td{background:var(--hover)}
+.up{color:var(--up)} .down{color:var(--down)} .flat{color:var(--flat)}
+svg.spark{display:block}
+.macro{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+.mcard{border:1px solid var(--line);border-radius:5px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.mcard .lbl{font-size:13px;color:var(--muted);line-height:1.25}
+.mcard .val{font:500 22px var(--f-data)}
+.mcard .meta{font:12px var(--f-data);color:var(--muted);display:flex;justify-content:space-between;gap:8px}
+.mgroup{font:600 12px var(--f-body);letter-spacing:.1em;text-transform:uppercase;margin:14px 0 6px}
+.mgroup:first-child{margin-top:0}
+.empty{padding:24px;text-align:center;color:var(--muted)}
+.empty b{color:var(--fg)}
+.notes{font-size:13px;color:var(--muted);display:grid;gap:4px}
+.notes p{margin:0}
+.err{color:var(--down);font-family:var(--f-data);font-size:12px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (max-width:640px){#basket th:nth-child(2),#basket td.nm,#basket th:nth-child(4),#basket tr:not(.grp) td:nth-child(4),#basket th:nth-child(9),#basket tr:not(.grp) td:nth-child(9){display:none}td,th{padding:6px 5px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Markets Board</h1>
+      <p class="sub">The watch basket and the macro signals behind the real estate book. Prices update every weekday after the close.</p>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+      <div class="fresh" id="fresh">Loading…</div>
+      <nav><a href="./">← Deal Intelligence</a></nav>
+    </div>
+  </header>
+
+  <section class="panel">
+    <h2>The basket</h2>
+    <div class="tablewrap">
+      <table id="basket">
+        <thead><tr>
+          <th data-k="symbol">Symbol</th><th data-k="name">Name</th><th data-k="last">Last</th><th data-k="spark" style="cursor:default">1 year</th>
+          <th data-k="d1">1D</th><th data-k="m1">1M</th><th data-k="ytd">YTD</th><th data-k="y1">1Y</th><th data-k="y3">3Y / yr</th>
+        </tr></thead>
+        <tbody><tr><td colspan="9" class="empty">Loading prices…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Macro strip</h2>
+    <div id="macro"><div class="empty">Loading macro data…</div></div>
+  </section>
+
+  <div class="notes">
+    <p><b>Returns</b> include dividends (adjusted closes from Tiingo). 3Y / yr is the annualized three-year return. Crypto trades every day, so its 1D is the last calendar day.</p>
+    <p><b>Macro data</b> comes from the Federal Reserve's FRED database. Monthly series show the latest release, so they lag by a month or two. Change is versus the same point a year earlier.</p>
+    <p id="errs" class="err"></p>
+  </div>
+</div>
+
+<script>
+const pct=v=>v==null||!isFinite(v)?"–":(v>0?"+":"")+(v*100).toFixed(1)+"%";
+const cls=v=>v==null||!isFinite(v)?"flat":v>0.0005?"up":v<-0.0005?"down":"flat";
+const num=(v,d=2)=>v==null?"–":v.toLocaleString("en-US",{minimumFractionDigits:d,maximumFractionDigits:d});
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function valueOnOrBefore(series,date){ // series: [[YYYY-MM-DD, v],...] ascending
+  let lo=0,hi=series.length-1,ans=null;
+  while(lo<=hi){const m=(lo+hi)>>1; if(series[m][0]<=date){ans=series[m];lo=m+1}else hi=m-1}
+  return ans;
+}
+const shift=(date,days)=>{const d=new Date(date+"T00:00:00Z");d.setUTCDate(d.getUTCDate()-days);return d.toISOString().slice(0,10)};
+
+function stats(series){
+  const n=series.length; if(!n) return {};
+  const [ld,lv]=series[n-1], prev=n>1?series[n-2][1]:null;
+  const at=days=>{const r=valueOnOrBefore(series,shift(ld,days));return r?r[1]:null};
+  const ytdBase=valueOnOrBefore(series,(+ld.slice(0,4)-1)+"-12-31");
+  const v3=at(1095), first=series[0][0];
+  return {date:ld,last:lv,d1:prev?lv/prev-1:null,m1:at(30)?lv/at(30)-1:null,
+    ytd:ytdBase?lv/ytdBase[1]-1:null,y1:at(365)?lv/at(365)-1:null,
+    y3:(v3&&first<=shift(ld,1095))?Math.pow(lv/v3,1/3)-1:null};
+}
+
+function spark(series,days,w=110,h=28){
+  if(!series.length) return "";
+  const end=series[series.length-1][0], s=series.filter(r=>r[0]>=shift(end,days));
+  if(s.length<2) return "";
+  const vs=s.map(r=>r[1]), mn=Math.min(...vs), mx=Math.max(...vs), rg=mx-mn||1;
+  const pts=vs.map((v,i)=>[(i/(vs.length-1))*(w-4)+2,h-3-((v-mn)/rg)*(h-6)]);
+  const d=pts.map((p,i)=>(i?"L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1)).join("");
+  const last=pts[pts.length-1];
+  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">
+    <path d="${d}L${w-2} ${h}L2 ${h}Z" fill="var(--sparkfill)"/><path d="${d}" fill="none" stroke="var(--spark)" stroke-width="1.3"/>
+    <circle cx="${last[0]}" cy="${last[1]}" r="2.2" fill="var(--spark)"/></svg>`;
+}
+
+let ROWS=[], sortK=null, sortDir=-1;
+const GROUPS=["Core","Safety","Themes","Crypto"];
+function renderBasket(){
+  const tb=document.querySelector("#basket tbody");
+  let html="";
+  const rowHtml=r=>`<tr><td class="sym">${esc(r.symbol)}</td><td class="nm">${esc(r.name)}</td><td>${num(r.last,r.last>=1000?0:2)}</td><td>${r.spark}</td>`+
+    ["d1","m1","ytd","y1","y3"].map(k=>`<td class="${cls(r[k])}">${pct(r[k])}</td>`).join("")+`</tr>`;
+  if(sortK){
+    const rs=[...ROWS].sort((a,b)=>{const x=a[sortK],y=b[sortK];if(x==null)return 1;if(y==null)return -1;return (typeof x==="string"?x.localeCompare(y):x-y)*sortDir});
+    html=rs.map(rowHtml).join("");
+  } else {
+    for(const g of GROUPS){const rs=ROWS.filter(r=>r.group===g);if(!rs.length)continue;html+=`<tr class="grp"><td colspan="9">${g}</td></tr>`+rs.map(rowHtml).join("")}
+  }
+  tb.innerHTML=html||`<tr><td colspan="9" class="empty">No prices yet.</td></tr>`;
+  document.querySelectorAll("#basket th").forEach(th=>{th.removeAttribute("aria-sort");if(th.dataset.k===sortK)th.setAttribute("aria-sort",sortDir>0?"ascending":"descending")});
+}
+document.querySelectorAll("#basket th").forEach(th=>th.addEventListener("click",()=>{
+  const k=th.dataset.k; if(k==="spark")return;
+  if(sortK===k){ if(sortDir===-1) sortDir=1; else {sortK=null;sortDir=-1} } else {sortK=k;sortDir=(k==="symbol"||k==="name")?1:-1}
+  renderBasket();
+}));
+
+function renderMacro(macro){
+  const el=document.getElementById("macro");
+  if(!macro.length){el.innerHTML=`<div class="empty">No macro data yet.</div>`;return}
+  const order=["Markets","Rates","Housing","Construction"];
+  el.innerHTML=order.map(g=>{
+    const ms=macro.filter(m=>m.group===g); if(!ms.length) return "";
+    return `<div class="mgroup">${g}</div><div class="macro">`+ms.map(m=>{
+      const s=m.series, n=s.length; if(!n) return "";
+      const [ld,lv]=s[n-1], yr=valueOnOrBefore(s,shift(ld,365));
+      const isRate=m.units==="%";
+      const ch=yr?(isRate?lv-yr[1]:lv/yr[1]-1):null;
+      const chTxt=ch==null?"–":isRate?(ch>0?"+":"")+ch.toFixed(2)+" pts":pct(ch);
+      const dec=isRate?2:(lv>=1000?0:1);
+      return `<div class="mcard"><div class="lbl">${esc(m.label)}</div><div class="val">${num(lv,dec)}${isRate?"%":""}</div>
+        ${spark(s,1825,200,34)}<div class="meta"><span>${ld}</span><span class="${cls(ch)}">${chTxt} vs 1 yr</span></div></div>`}).join("")+`</div>`;
+  }).join("");
+}
+
+fetch("data/market.json",{cache:"no-store"}).then(r=>{if(!r.ok)throw new Error(r.status);return r.json()}).then(data=>{
+  ROWS=data.assets.map(a=>({group:a.group,symbol:a.symbol,name:a.name,...stats(a.series),spark:spark(a.series,365)}));
+  renderBasket(); renderMacro(data.macro||[]);
+  const upd=new Date(data.updated.replace("Z",":00Z")), ageDays=(Date.now()-upd)/864e5;
+  document.getElementById("fresh").innerHTML=`Updated ${upd.toLocaleString("en-US",{dateStyle:"medium",timeStyle:"short"})} <span class="pill ${ageDays>4?"stale":"ok"}">${ageDays>4?"Stale":"Current"}</span>`;
+  if(data.errors&&data.errors.length) document.getElementById("errs").textContent="Missing from the last run: "+data.errors.join(" · ");
+}).catch(()=>{
+  const msg=`<b>No data yet.</b><br>Prices appear after the market data job runs for the first time. Run it from the repo's Actions tab, or wait for tonight's run.`;
+  document.querySelector("#basket tbody").innerHTML=`<tr><td colspan="9" class="empty">${msg}</td></tr>`;
+  document.getElementById("macro").innerHTML=`<div class="empty">Macro data appears with the first run.</div>`;
+  document.getElementById("fresh").textContent="Waiting for first run";
+});
+</script>
+</body>
+</html>
