@@ -88,6 +88,26 @@ svg.spark{display:block}
 .legend2 button{border:0;background:none;color:var(--muted);cursor:pointer;font:inherit;padding:0 2px}
 .ctip{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:7px 9px;font:12px var(--f-data);box-shadow:0 4px 14px rgba(0,0,0,.16);z-index:3;white-space:nowrap}
 .ctip b{font-family:var(--f-body)}
+
+/* paper portfolios */
+.acct{display:grid;grid-template-columns:minmax(0,6fr) minmax(0,5fr);gap:18px;padding:14px 0;border-top:1px solid var(--line)}
+.acct:first-of-type{border-top:0;padding-top:4px}
+@media (max-width:900px){.acct{grid-template-columns:minmax(0,1fr)}}
+.ahead{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 16px}
+.aname{font:700 24px/1.1 var(--f-display);text-transform:uppercase;letter-spacing:.02em;margin:0}
+.anote{font-size:13px;color:var(--muted);margin:2px 0 10px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:10px}
+.kpi{border:1px solid var(--line);border-radius:5px;padding:8px 10px;min-width:0}
+.kpi .k{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.kpi .v{font:500 20px var(--f-data);font-variant-numeric:tabular-nums}
+.kpi .s{font:12px var(--f-data);color:var(--muted)}
+.kpi.miss{border-color:var(--warnline)}
+.verdict{font-size:14px;margin:0 0 8px}
+.htab td,.htab th{font-size:12px;padding:4px 6px}
+.htab td.nm{font-size:13px;min-width:0}
+.waiting{font-size:12px;color:var(--down);font-family:var(--f-data);margin:6px 0 0}
+.pfwrap{--pa:#2a78d6;--warnline:#e3b54a}
+@media (prefers-color-scheme: dark){.pfwrap{--pa:#3987e5;--warnline:#8a6a1e}}
 </style>
 </head>
 <body>
@@ -103,6 +123,13 @@ svg.spark{display:block}
     </div>
   </header>
 
+
+
+  <section class="panel pfwrap" id="portfolios" hidden>
+    <h2>Paper portfolios</h2>
+    <p class="cnote" style="margin-top:-4px">Pretend money, priced daily with real closing prices. Cash sits in a money market earning the T-bill rate. The dashed line in each chart is the same deposit put entirely into the total stock market (VTI) on day one.</p>
+    <div id="accts"></div>
+  </section>
 
   <section class="panel s1" id="compare">
     <h2>Head to head</h2>
@@ -185,7 +212,7 @@ function spark(series,days,w=110,h=28){
 }
 
 let ROWS=[], sortK=null, sortDir=-1;
-const GROUPS=["Core","Safety","Themes","Crypto"];
+const GROUPS=["Core","Safety","Themes","Crypto","Picks"];
 function renderBasket(){
   const tb=document.querySelector("#basket tbody");
   let html="";
@@ -326,9 +353,86 @@ function initCompare(assets){
 }
 function togglePickQuiet(sym){const used=new Set(Object.values(SLOT));SLOT[sym]=[1,2,3,4,5,6].find(n=>!used.has(n));PICKS.push(sym)}
 
+// ---------- Paper portfolios ----------
+const money=(v,sign)=>{if(v==null||!isFinite(v))return "–";const a=Math.abs(v),t=a>=1e6?"$"+(a/1e6).toFixed(2)+"M":a>=1e3?"$"+Math.round(a/1e3).toLocaleString("en-US")+"K":"$"+Math.round(a);return (v<0?"−":sign&&v>0?"+":"")+t};
+function onOrAfter(series,date){let lo=0,hi=series.length-1,ans=null;while(lo<=hi){const m=(lo+hi)>>1;if(series[m][0]>=date){ans=series[m];hi=m-1}else lo=m+1}return ans}
+
+function simulate(acct,PX,cashOverride){
+  const cash=cashOverride||acct.cash_asset, bench=PX[acct.benchmark];
+  const res={missing:new Set(),units:{},cost:{},dates:[],values:[]};
+  if(!bench||!PX[cash]) {res.fatal=true;return res}
+  const dates=bench.filter(r=>r[0]>=acct.start).map(r=>r[0]);
+  const px=(sym,d)=>{const s=PX[sym];if(!s)return null;const r=valueOnOrBefore(s,d);return r?r[1]:null};
+  const trades=[...(acct.trades||[])].sort((a,b)=>a.date<b.date?-1:1); let ti=0;
+  const u=res.units; u[cash]=acct.deposit/px(cash,dates[0]);
+  for(const d of dates){
+    while(ti<trades.length&&trades[ti].date<=d){
+      const t=trades[ti++], sym=t.buy||t.sell, p=px(sym,d), cp=px(cash,d);
+      if(!p||!PX[sym]||PX[sym][0][0]>d){res.missing.add(sym);continue}
+      if(t.buy){const dol=Math.min(t.dollars,(u[cash]||0)*cp);u[sym]=(u[sym]||0)+dol/p;u[cash]-=dol/cp;res.cost[sym]=(res.cost[sym]||0)+dol}
+      else{const have=u[sym]||0;let sh=t.shares!=null?t.shares:t.pct!=null?have*t.pct:t.dollars/p;sh=Math.min(sh,have);
+        if(have>0)res.cost[sym]=(res.cost[sym]||0)*(1-sh/have);u[sym]=have-sh;u[cash]+=sh*p/cp}
+    }
+    let v=0;for(const k in u){const p=px(k,d);if(p)v+=u[k]*p}
+    res.dates.push(d);res.values.push(v);
+  }
+  res.cashSym=cash; res.px=px;
+  return res;
+}
+
+function acctChart(dates,lines,W=600,H=230){
+  const L=58,R=124,T=8,B=22, all=lines.flatMap(l=>l.vals); let mn=Math.min(...all),mx=Math.max(...all);const pad=(mx-mn)*.08||mx*.02;mn-=pad;mx+=pad;
+  const X=i=>L+i/(dates.length-1||1)*(W-L-R), Y=v=>T+(mx-v)/(mx-mn)*(H-T-B);
+  let g=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Account value versus all-in total market">`;
+  for(const t of ticks(mn,mx,4)) g+=`<line class="grid" x1="${L}" x2="${W-R}" y1="${Y(t)}" y2="${Y(t)}"/><text class="ax" x="${L-6}" y="${Y(t)+4}" text-anchor="end">${money(t)}</text>`;
+  const fm=d=>new Date(d+"T00:00:00Z").toLocaleDateString("en-US",{month:"short",day:"numeric",timeZone:"UTC"});
+  [0,Math.floor((dates.length-1)/2),dates.length-1].forEach((i,k)=>{g+=`<text class="ax" x="${X(i)}" y="${H-6}" text-anchor="${k===0?"start":k===2?"end":"middle"}">${fm(dates[i])}</text>`});
+  const ends=lines.map(l=>({l,y:Y(l.vals[l.vals.length-1])})).sort((a,b)=>a.y-b.y); for(let i=1;i<ends.length;i++) if(ends[i].y-ends[i-1].y<14) ends[i].y=ends[i-1].y+14;
+  for(const l of lines){g+=`<path d="${l.vals.map((v,i)=>(i?"L":"M")+X(i).toFixed(1)+" "+Y(v).toFixed(1)).join("")}" fill="none" stroke="${l.color}" stroke-width="2" ${l.dash?'stroke-dasharray="5 4"':""}/>`}
+  for(const e of ends){const v=e.l.vals[e.l.vals.length-1];g+=`<circle cx="${X(dates.length-1)}" cy="${Y(v)}" r="3.5" fill="${e.l.color}" stroke="var(--panel)" stroke-width="2"/><text class="blab" x="${W-R+8}" y="${e.y+4}">${esc(e.l.label)} ${money(v)}</text>`}
+  return g+`</svg>`;
+}
+
+function renderPortfolios(pf,data){
+  const PX={};for(const a of data.assets)PX[a.symbol]=a.series;
+  const NAMES={};for(const a of data.assets)NAMES[a.symbol]=a.name;
+  const mm=(data.macro||[]).find(m=>m.id==="DGS3MO"), mmRate=mm?mm.series[mm.series.length-1][1]:null;
+  const out=[];
+  for(const acct of pf.accounts){
+    const r=simulate(acct,PX); if(r.fatal||!r.dates.length) continue;
+    const alt=simulate(acct,PX,acct.benchmark);
+    const bench=PX[acct.benchmark], b0=valueOnOrBefore(bench,r.dates[0])[1];
+    const shadow=r.dates.map(d=>acct.deposit*valueOnOrBefore(bench,d)[1]/b0);
+    const n=r.values.length-1, val=r.values[n], gain=val-acct.deposit, sh=shadow[n], diff=val-sh;
+    const cashVal=(r.units[r.cashSym]||0)*r.px(r.cashSym,r.dates[n]), cashDrag=alt.values[alt.values.length-1]-val;
+    const yrs=(Date.parse(r.dates[n])-Date.parse(r.dates[0]))/(365.25*864e5);
+    const holdings=Object.keys(r.units).filter(k=>k!==r.cashSym&&r.units[k]>1e-9).map(k=>{const v=r.units[k]*r.px(k,r.dates[n]),c=r.cost[k]||0;return {k,v,c,g:c?v/c-1:null}}).sort((a,b)=>b.v-a.v);
+    const rowsH=holdings.map(h=>`<tr><td class="sym">${esc(h.k)}</td><td class="nm">${esc(NAMES[h.k]||"")}</td><td>${money(h.c)}</td><td>${money(h.v)}</td><td class="${cls(h.g)}">${pct(h.g)}</td><td class="${cls(h.v-h.c)}">${money(h.v-h.c,true)}</td><td>${(h.v/val*100).toFixed(1)}%</td></tr>`).join("")
+      +`<tr><td class="sym">Cash</td><td class="nm">Money market${mmRate!=null?` (${mmRate.toFixed(2)}% now)`:""}</td><td></td><td>${money(cashVal)}</td><td></td><td></td><td>${(cashVal/val*100).toFixed(1)}%</td></tr>`;
+    const verdict=Math.abs(diff)<acct.deposit*0.002?`Even with the total market so far.`:diff<0?`<b class="down">Behind</b> the all-in total market by <b>${money(-diff)}</b> since ${new Date(r.dates[0]+"T00:00:00Z").toLocaleDateString("en-US",{month:"short",day:"numeric",timeZone:"UTC"})}.`:`<b class="up">Ahead</b> of the all-in total market by <b>${money(diff)}</b>.`;
+    out.push(`<div class="acct">
+      <div>
+        <div class="ahead"><h3 class="aname">${esc(acct.name)}</h3><span class="fresh">${money(acct.deposit)} deposited ${esc(acct.start)}</span></div>
+        <p class="anote">${esc(acct.note||"")}</p>
+        <div class="kpis">
+          <div class="kpi"><div class="k">Value now</div><div class="v">${money(val)}</div><div class="s ${cls(gain)}">${money(gain,true)} · ${pct(val/acct.deposit-1)}</div></div>
+          <div class="kpi"><div class="k">All in ${esc(acct.benchmark)}</div><div class="v">${money(sh)}</div><div class="s ${cls(sh-acct.deposit)}">${pct(sh/acct.deposit-1)}</div></div>
+          <div class="kpi"><div class="k">Cost of cash</div><div class="v ${cashDrag>0?"down":"up"}">${money(Math.abs(cashDrag))}</div><div class="s">${cashDrag>0?"missed by holding cash, not "+esc(acct.benchmark):"saved by holding cash"}</div></div>
+        </div>
+        <p class="verdict">${verdict}</p>
+        <div class="chart">${acctChart(r.dates,[{label:"Account",vals:r.values,color:"var(--pa)"},{label:"All "+acct.benchmark,vals:shadow,color:"var(--muted)",dash:true}])}</div>
+        ${r.missing.size?`<p class="waiting">Not priced yet, held as cash until tonight's data run: ${[...r.missing].map(esc).join(", ")}</p>`:""}
+      </div>
+      <div class="tablewrap"><table class="htab"><thead><tr><th>Holding</th><th>Name</th><th>Cost</th><th>Value</th><th>Return</th><th>Gain</th><th>Weight</th></tr></thead><tbody>${rowsH}</tbody></table></div>
+    </div>`);
+  }
+  if(out.length){document.getElementById("accts").innerHTML=out.join("");document.getElementById("portfolios").hidden=false}
+}
+
 fetch("data/market.json",{cache:"no-store"}).then(r=>{if(!r.ok)throw new Error(r.status);return r.json()}).then(data=>{
   ROWS=data.assets.map(a=>({group:a.group,symbol:a.symbol,name:a.name,...stats(a.series),spark:spark(a.series,365)}));
   renderBasket(); renderMacro(data.macro||[]); initCompare(data.assets);
+  fetch("data/portfolios.json",{cache:"no-store"}).then(r=>r.ok?r.json():null).then(pf=>{if(pf)renderPortfolios(pf,data)}).catch(()=>{});
   const upd=new Date(data.updated.replace("Z",":00Z")), ageDays=(Date.now()-upd)/864e5;
   document.getElementById("fresh").innerHTML=`Updated ${upd.toLocaleString("en-US",{dateStyle:"medium",timeStyle:"short"})} <span class="pill ${ageDays>4?"stale":"ok"}">${ageDays>4?"Stale":"Current"}</span>`;
   if(data.errors&&data.errors.length) document.getElementById("errs").textContent="Missing from the last run: "+data.errors.join(" · ");
