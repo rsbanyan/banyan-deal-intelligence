@@ -116,6 +116,16 @@ def main():
     start = (today - dt.timedelta(days=365 * YEARS + 10)).isoformat()
     out = {"updated": dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%MZ"), "assets": [], "macro": [], "errors": []}
 
+    # keep the last good data, so a failed ticker (e.g. a rate limit) is never wiped
+    prev_assets, prev_macro = {}, {}
+    try:
+        with open(OUT) as f:
+            prev = json.load(f)
+        prev_assets = {a["symbol"]: a for a in prev.get("assets", [])}
+        prev_macro = {m["id"]: m for m in prev.get("macro", [])}
+    except Exception:
+        pass
+
     for group, tk, sym, name in BASKET + CRYPTO + PICKS:
         try:
             series = tiingo_crypto(tk, start) if group == "Crypto" else tiingo_daily(tk, start)
@@ -123,7 +133,9 @@ def main():
                 raise ValueError("no rows returned")
             out["assets"].append({"group": group, "symbol": sym, "name": name, "series": series})
         except Exception as e:
-            out["errors"].append(f"{sym}: {e}")
+            out["errors"].append(f"{sym}: {e}" + (" (kept previous data)" if sym in prev_assets else ""))
+            if sym in prev_assets:
+                out["assets"].append(prev_assets[sym])
         time.sleep(1.2)  # stay well inside Tiingo's free-tier rate limit
 
     for sid, label, units, group in MACRO:
@@ -131,7 +143,12 @@ def main():
             out["macro"].append({"id": sid, "label": label, "units": units, "group": group,
                                  "series": fred(sid, start)})
         except Exception as e:
-            out["errors"].append(f"{sid}: {e}")
+            out["errors"].append(f"{sid}: {e}" + (" (kept previous data)" if sid in prev_macro else ""))
+            if sid in prev_macro:
+                out["macro"].append(prev_macro[sid])
+
+    order = {sym: i for i, (_, _, sym, _) in enumerate(BASKET + CRYPTO + PICKS)}
+    out["assets"].sort(key=lambda a: order.get(a["symbol"], 999))
 
     # never overwrite good data with an empty run
     if len(out["assets"]) < len(BASKET) // 2:
