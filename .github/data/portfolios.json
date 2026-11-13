@@ -1,0 +1,44 @@
+{
+  "_how_to_edit": "Pretend money. Each account starts with a deposit that sits in cash (the money market, valued with SGOV, which tracks 0-3 month T-bills). Each trade moves money between cash and an investment at that day's closing price. Buy with dollars; sell with dollars, shares, or pct (1 = sell all). Trades on a weekend or holiday fill at the next trading day's close.",
+  "accounts": [
+    {
+      "id": "core",
+      "name": "Core account",
+      "note": "Starter mix: heavy cash, the total market, Berkshire, bonds and gold.",
+      "start": "2026-01-02",
+      "deposit": 10000000,
+      "cash_asset": "SGOV",
+      "benchmark": "VTI",
+      "trades": [
+        {"date": "2026-01-02", "buy": "VTI", "dollars": 3000000},
+        {"date": "2026-01-02", "buy": "BRK.B", "dollars": 1000000},
+        {"date": "2026-01-02", "buy": "IEF", "dollars": 1000000},
+        {"date": "2026-01-02", "buy": "VXUS", "dollars": 500000},
+        {"date": "2026-01-02", "buy": "TLT", "dollars": 500000},
+        {"date": "2026-01-02", "buy": "GLD", "dollars": 500000},
+        {"date": "2026-01-02", "buy": "SCHD", "dollars": 500000}
+      ]
+    },
+    {
+      "id": "picks",
+      "name": "Ryan's Picks",
+      "note": "Bets on the themes: nuclear, the grid and reshoring, storage, AI and drugs. $100K each.",
+      "start": "2026-01-02",
+      "deposit": 1000000,
+      "cash_asset": "SGOV",
+      "benchmark": "VTI",
+      "trades": [
+        {"date": "2026-01-02", "buy": "CCJ", "dollars": 100000},
+        {"date": "2026-01-02", "buy": "OKLO", "dollars": 100000},
+        {"date": "2026-01-02", "buy": "CEG", "dollars": 100000},
+        {"date": "2026-01-02", "buy": "GEV", "dollars": 100000},
+        {"date": "2026-01-02", "buy": "ETN", "dollars": 100000},
+        {"date": "2026-01-02", "buy": "PWR", "dollars": 100000},
+        {"date": "2026-01-02", "buy": "FLNC", "dollars": 100000},
+        {"date": "2026-01-02", "buy": "NVDA", "dollars": 100000},
+        {"date": "2026-01-02", "buy": "LLY", "dollars": 100000},
+        {"date": "2026-01-02", "buy": "RXRX", "dollars": 100000}
+      ]
+    }
+  ]
+}
