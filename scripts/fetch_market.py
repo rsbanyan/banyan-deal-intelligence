@@ -42,6 +42,18 @@ BASKET = [
     ("Themes", "PLD", "PLD", "Prologis (industrial REIT)"),
 ]
 CRYPTO = [("Crypto", "btcusd", "BTC", "Bitcoin"), ("Crypto", "ethusd", "ETH", "Ethereum")]
+# Ryan's Picks: tickers the paper portfolios hold that are not in the basket
+PICKS = [
+    ("Picks", "OKLO", "OKLO", "Oklo (small modular reactors)"),
+    ("Picks", "CEG", "CEG", "Constellation Energy (nuclear power)"),
+    ("Picks", "GEV", "GEV", "GE Vernova (gas turbines, grid)"),
+    ("Picks", "ETN", "ETN", "Eaton (electrical equipment)"),
+    ("Picks", "PWR", "PWR", "Quanta Services (grid construction)"),
+    ("Picks", "FLNC", "FLNC", "Fluence (battery storage)"),
+    ("Picks", "NVDA", "NVDA", "NVIDIA (AI chips)"),
+    ("Picks", "LLY", "LLY", "Eli Lilly"),
+    ("Picks", "RXRX", "RXRX", "Recursion (AI drug discovery)"),
+]
 
 # id, label, units, group
 MACRO = [
@@ -104,7 +116,7 @@ def main():
     start = (today - dt.timedelta(days=365 * YEARS + 10)).isoformat()
     out = {"updated": dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%MZ"), "assets": [], "macro": [], "errors": []}
 
-    for group, tk, sym, name in BASKET + CRYPTO:
+    for group, tk, sym, name in BASKET + CRYPTO + PICKS:
         try:
             series = tiingo_crypto(tk, start) if group == "Crypto" else tiingo_daily(tk, start)
             if not series:
