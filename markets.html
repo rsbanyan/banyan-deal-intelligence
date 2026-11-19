@@ -119,7 +119,7 @@ svg.spark{display:block}
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
       <div class="fresh" id="fresh">Loading…</div>
-      <nav><a href="./">← Deal Intelligence</a></nav>
+      <nav style="display:flex;gap:14px"><a href="picks.html">My Picks</a><a href="./">Deal Intelligence</a></nav>
     </div>
   </header>
 
@@ -369,7 +369,7 @@ function simulate(acct,PX,cashOverride){
     while(ti<trades.length&&trades[ti].date<=d){
       const t=trades[ti++], sym=t.buy||t.sell, p=px(sym,d), cp=px(cash,d);
       if(!p||!PX[sym]||PX[sym][0][0]>d){res.missing.add(sym);continue}
-      if(t.buy){const dol=Math.min(t.dollars,(u[cash]||0)*cp);u[sym]=(u[sym]||0)+dol/p;u[cash]-=dol/cp;res.cost[sym]=(res.cost[sym]||0)+dol}
+      if(t.buy){const dol=Math.min(t.dollars!=null?t.dollars:t.shares*p,(u[cash]||0)*cp);u[sym]=(u[sym]||0)+dol/p;u[cash]-=dol/cp;res.cost[sym]=(res.cost[sym]||0)+dol}
       else{const have=u[sym]||0;let sh=t.shares!=null?t.shares:t.pct!=null?have*t.pct:t.dollars/p;sh=Math.min(sh,have);
         if(have>0)res.cost[sym]=(res.cost[sym]||0)*(1-sh/have);u[sym]=have-sh;u[cash]+=sh*p/cp}
     }
@@ -412,7 +412,7 @@ function renderPortfolios(pf,data){
     const verdict=Math.abs(diff)<acct.deposit*0.002?`Even with the total market so far.`:diff<0?`<b class="down">Behind</b> the all-in total market by <b>${money(-diff)}</b> since ${new Date(r.dates[0]+"T00:00:00Z").toLocaleDateString("en-US",{month:"short",day:"numeric",timeZone:"UTC"})}.`:`<b class="up">Ahead</b> of the all-in total market by <b>${money(diff)}</b>.`;
     out.push(`<div class="acct">
       <div>
-        <div class="ahead"><h3 class="aname">${esc(acct.name)}</h3><span class="fresh">${money(acct.deposit)} deposited ${esc(acct.start)}</span></div>
+        <div class="ahead"><h3 class="aname">${esc(acct.name)}</h3><span class="fresh">${money(acct.deposit)} deposited ${esc(acct.start)}${acct.link?` · <a href="${acct.link}" style="color:var(--accent)">Open trading account →</a>`:""}</span></div>
         <p class="anote">${esc(acct.note||"")}</p>
         <div class="kpis">
           <div class="kpi"><div class="k">Value now</div><div class="v">${money(val)}</div><div class="s ${cls(gain)}">${money(gain,true)} · ${pct(val/acct.deposit-1)}</div></div>
@@ -432,7 +432,14 @@ function renderPortfolios(pf,data){
 fetch("data/market.json",{cache:"no-store"}).then(r=>{if(!r.ok)throw new Error(r.status);return r.json()}).then(data=>{
   ROWS=data.assets.map(a=>({group:a.group,symbol:a.symbol,name:a.name,...stats(a.series),spark:spark(a.series,365)}));
   renderBasket(); renderMacro(data.macro||[]); initCompare(data.assets);
-  fetch("data/portfolios.json",{cache:"no-store"}).then(r=>r.ok?r.json():null).then(pf=>{if(pf)renderPortfolios(pf,data)}).catch(()=>{});
+  fetch("data/portfolios.json",{cache:"no-store"}).then(r=>r.ok?r.json():null).then(async pf=>{if(!pf)return;
+    try{ // the Picks account trades live in Supabase (edited on picks.html); fall back to the file if unreachable
+      const K="sb_publishable_p3PAuJUaJgR-ZcbkiD0dHA_7PJtqdyW";
+      const r=await fetch("https://lgjujubysmkmdkcpjuse.supabase.co/rest/v1/paper_trades?account=eq.picks&select=*&order=trade_date.asc,created_at.asc",{headers:{apikey:K,Authorization:"Bearer "+K}});
+      if(r.ok){const rows=await r.json();const acct=pf.accounts.find(a=>a.id==="picks");
+        if(acct&&rows.length){acct.trades=rows.map(t=>t.side==="buy"?{date:t.trade_date,buy:t.symbol,dollars:t.dollars!=null?+t.dollars:null,shares:t.shares!=null?+t.shares:null}:{date:t.trade_date,sell:t.symbol,dollars:t.dollars!=null?+t.dollars:undefined,shares:t.shares!=null?+t.shares:undefined});acct.link="picks.html"}}
+    }catch(e){}
+    renderPortfolios(pf,data)}).catch(()=>{});
   const upd=new Date(data.updated.replace("Z",":00Z")), ageDays=(Date.now()-upd)/864e5;
   document.getElementById("fresh").innerHTML=`Updated ${upd.toLocaleString("en-US",{dateStyle:"medium",timeStyle:"short"})} <span class="pill ${ageDays>4?"stale":"ok"}">${ageDays>4?"Stale":"Current"}</span>`;
   if(data.errors&&data.errors.length) document.getElementById("errs").textContent="Missing from the last run: "+data.errors.join(" · ");
