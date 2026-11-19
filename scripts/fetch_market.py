@@ -74,6 +74,29 @@ MACRO = [
 ]
 
 
+# The trading page saves its watchlist and trades in Supabase. Both tables are
+# readable with the public (publishable) key, the same one the web app ships.
+SUPA_URL = "https://lgjujubysmkmdkcpjuse.supabase.co/rest/v1"
+SUPA_KEY = "sb_publishable_p3PAuJUaJgR-ZcbkiD0dHA_7PJtqdyW"
+
+
+def supabase_symbols():
+    """Tickers on the watchlist or ever traded, with names where known."""
+    out = {}
+    hdr = {"apikey": SUPA_KEY, "Authorization": f"Bearer {SUPA_KEY}", "User-Agent": "banyan-market-job"}
+    for table, cols in (("watchlist", "symbol,name"), ("paper_trades", "symbol")):
+        try:
+            for row in get(f"{SUPA_URL}/{table}?select={cols}", hdr):
+                sym = (row.get("symbol") or "").strip().upper()
+                if sym:
+                    out.setdefault(sym, row.get("name") or "")
+                    if row.get("name"):
+                        out[sym] = row["name"]
+        except Exception as e:
+            print(f"  note: could not read {table}: {e}")
+    return out
+
+
 def get(url, headers=None, tries=3):
     for i in range(tries):
         try:
@@ -126,7 +149,17 @@ def main():
     except Exception:
         pass
 
-    for group, tk, sym, name in BASKET + CRYPTO + PICKS:
+    configured = BASKET + CRYPTO + PICKS
+    known = {sym for _, _, sym, _ in configured}
+    extras = [("Watchlist", sym.replace(".", "-"), sym, name or sym)
+              for sym, name in sorted(supabase_symbols().items()) if sym not in known]
+    todo = configured + extras
+    # Refresh the stalest data first, so if the hourly limit cuts a run short
+    # the tickers it skips are the ones refreshed most recently.
+    last = {sym: a["series"][-1][0] for sym, a in prev_assets.items() if a.get("series")}
+    todo.sort(key=lambda t: last.get(t[2], ""))
+
+    for group, tk, sym, name in todo:
         try:
             series = tiingo_crypto(tk, start) if group == "Crypto" else tiingo_daily(tk, start)
             if not series:
@@ -147,7 +180,7 @@ def main():
             if sid in prev_macro:
                 out["macro"].append(prev_macro[sid])
 
-    order = {sym: i for i, (_, _, sym, _) in enumerate(BASKET + CRYPTO + PICKS)}
+    order = {sym: i for i, (_, _, sym, _) in enumerate(configured + extras)}
     out["assets"].sort(key=lambda a: order.get(a["symbol"], 999))
 
     # never overwrite good data with an empty run
