@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>My Picks Trading Account</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: brokerage-style single page. Account summary and chart first, then positions with trade buttons, the trade log, and the watchlist */
+:root{
+  --bg:#f1f3f2; --panel:#ffffff; --fg:#1b2427; --muted:#5d6a6f; --line:#d8dddd; --hover:#e8ecec; --accent:#245f7d;
+  --up:#1b7a55; --down:#b2382f; --flat:#7b878b; --spark:#245f7d; --sparkfill:rgba(36,95,125,.10);
+  --pa:#2a78d6; --buy:#1b7a55; --sell:#b2382f; --pend:#9a6b00; --scrim:rgba(20,26,28,.45);
+  --f-display:"Barlow Condensed","Arial Narrow",Arial,sans-serif;
+  --f-body:"Source Sans 3","Segoe UI",system-ui,sans-serif;
+  --f-data:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#101518; --panel:#182024; --fg:#e2e8ea; --muted:#93a1a6; --line:#29343a; --hover:#212a2f; --accent:#6fb6d6;
+  --up:#45c08f; --down:#ec6a5f; --flat:#8b989c; --spark:#6fb6d6; --sparkfill:rgba(111,182,214,.12);
+  --pa:#3987e5; --buy:#45c08f; --sell:#ec6a5f; --pend:#e2a93a; --scrim:rgba(0,0,0,.6); color-scheme:dark}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font:15px/1.45 var(--f-body);padding:20px max(16px,env(safe-area-inset-right)) 40px max(16px,env(safe-area-inset-left))}
+.wrap{max-width:1240px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+header{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:10px 24px;border-bottom:2px solid var(--fg);padding-bottom:10px}
+h1{font:700 clamp(30px,4vw,44px)/1 var(--f-display);text-transform:uppercase;letter-spacing:.01em;margin:0}
+.sub{color:var(--muted);margin:6px 0 0;max-width:62ch}
+.hright{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.fresh{font-family:var(--f-data);font-size:12px;color:var(--muted)}
+nav{display:flex;gap:14px;font-size:14px}
+nav a{color:var(--accent)}
+.auth{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+h2{font:600 15px var(--f-display);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px 16px;min-width:0}
+.cnote{font-size:13px;color:var(--muted);margin:-2px 0 10px}
+button{font:inherit;color:var(--fg);cursor:pointer}
+.btn{background:transparent;border:1px solid var(--line);border-radius:4px;padding:4px 10px;font-size:13px}
+.btn:hover{background:var(--hover)}
+.btn.buy{color:var(--buy);border-color:var(--buy)} .btn.sell{color:var(--sell);border-color:var(--sell)}
+.btn.primary{background:var(--fg);color:var(--panel);border-color:var(--fg)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.sm{padding:2px 8px;font-size:12px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin-bottom:12px}
+.kpi{border:1px solid var(--line);border-radius:5px;padding:8px 10px;min-width:0}
+.kpi .k{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.kpi .v{font:500 22px var(--f-data);font-variant-numeric:tabular-nums}
+.kpi .s{font:12px var(--f-data);color:var(--muted)}
+.verdict{font-size:15px;margin:0 0 8px}
+.up{color:var(--up)} .down{color:var(--down)} .flat{color:var(--flat)} .pend{color:var(--pend)}
+.chart{position:relative}
+.chart svg{display:block;width:100%;height:auto;overflow:visible}
+.ax{font:11px var(--f-data);fill:var(--muted)}
+.grid{stroke:var(--line);stroke-width:1}
+.blab{font:12px var(--f-data);fill:var(--fg)}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th{font:600 11px var(--f-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);text-align:right;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+th.l,td.l{text-align:left}
+td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:right;font-family:var(--f-data);font-size:13px;white-space:nowrap;vertical-align:middle}
+td.sym{text-align:left;font-weight:500}
+td.nm{text-align:left;font-family:var(--f-body);font-size:14px;color:var(--muted);white-space:normal;min-width:140px}
+td.act{text-align:right;white-space:nowrap}
+td.act .btn+.btn{margin-left:4px}
+tbody tr:hover td{background:var(--hover)}
+.tag{display:inline-block;font:600 11px var(--f-body);letter-spacing:.06em;text-transform:uppercase;padding:1px 7px;border-radius:999px;border:1px solid currentColor}
+svg.spark{display:block;margin-left:auto}
+.empty{padding:18px;text-align:center;color:var(--muted)}
+.addrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+input,select{font:inherit;font-size:14px;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:5px 8px;min-width:0}
+input:focus,select:focus{outline:2px solid var(--accent);outline-offset:0}
+.msg{font-size:13px;margin:4px 0 0;min-height:1.2em}
+.msg.err{color:var(--down)} .msg.ok{color:var(--up)}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px}
+@media (max-width:900px){.grid2{grid-template-columns:minmax(0,1fr)}}
+.acctbar{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}
+.newtrade{font-size:15px;padding:7px 16px;font-weight:600}
+/* trade ticket */
+.scrim{position:fixed;inset:0;background:var(--scrim);display:flex;align-items:center;justify-content:center;padding:16px;z-index:20}
+.ticket{background:var(--panel);border:1px solid var(--line);border-radius:8px;width:min(440px,100%);padding:18px;display:flex;flex-direction:column;gap:12px;box-shadow:0 18px 40px rgba(0,0,0,.25)}
+.ticket h3{margin:0;font:700 24px var(--f-display);text-transform:uppercase}
+.seg{display:flex;gap:0;border:1px solid var(--line);border-radius:5px;overflow:hidden}
+.seg button{flex:1;border:0;background:transparent;padding:7px 0;font-weight:600}
+.seg button[aria-pressed="true"].b{background:var(--buy);color:var(--panel)}
+.seg button[aria-pressed="true"].s{background:var(--sell);color:var(--panel)}
+.seg button[aria-pressed="true"].n{background:var(--fg);color:var(--panel)}
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.preview{font:13px var(--f-data);color:var(--muted);background:var(--bg);border-radius:5px;padding:8px 10px;line-height:1.6}
+.preview b{color:var(--fg)}
+.tactions{display:flex;justify-content:flex-end;gap:8px}
+.signin{display:flex;flex-direction:column;gap:10px}
+.notes{font-size:13px;color:var(--muted);display:grid;gap:4px}
+.notes p{margin:0}
+@media (max-width:640px){.hide-sm{display:none}td,th{padding:6px 5px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>My Picks</h1>
+      <p class="sub">A $1M pretend trading account, priced every weekday with real closing prices. Trade, keep a watchlist, and see whether your calls beat simply owning the total market.</p>
+    </div>
+    <div class="hright">
+      <div class="fresh" id="fresh">Loading…</div>
+      <div class="auth" id="auth"></div>
+      <nav><a href="markets.html">Markets Board</a><a href="./">Deal Intelligence</a></nav>
+    </div>
+  </header>
+
+  <section class="panel">
+    <div class="acctbar"><h2 style="margin:0">Account</h2><button class="btn primary newtrade" data-t="buy" data-s="">+ New trade</button></div>
+    <div class="kpis" id="kpis"><div class="empty">Loading account…</div></div>
+    <p class="verdict" id="verdict"></p>
+    <div class="chart" id="chart"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Positions</h2>
+    <p class="cnote">Trades fill at the closing price on the trade date, or the next trading day if the market was closed. A trade dated today fills after tonight's close.</p>
+    <div class="tablewrap"><table id="pos"><thead><tr>
+      <th class="l">Symbol</th><th class="l hide-sm">Name</th><th class="hide-sm">Shares</th><th>Cost</th><th>Value</th><th>Gain</th><th>Return</th><th class="hide-sm">Weight</th><th class="hide-sm">1D</th><th class="hide-sm">3 months</th><th></th>
+    </tr></thead><tbody></tbody></table></div>
+  </section>
+
+  <div class="grid2">
+    <section class="panel">
+      <h2>Watchlist</h2>
+      <div class="addrow" id="addrow">
+        <input id="wsym" placeholder="Ticker, e.g. TSLA" maxlength="10" aria-label="Ticker to watch" style="width:150px;text-transform:uppercase">
+        <input id="wname" placeholder="Name (optional)" maxlength="60" aria-label="Name" style="flex:1;min-width:120px">
+        <button class="btn primary" id="wadd">Add</button>
+      </div>
+      <p class="msg" id="wmsg"></p>
+      <div class="tablewrap"><table id="watch"><thead><tr>
+        <th class="l">Symbol</th><th>Last</th><th>Since added</th><th class="hide-sm">1M</th><th>YTD</th><th class="hide-sm">1 year</th><th></th>
+      </tr></thead><tbody></tbody></table></div>
+    </section>
+
+    <section class="panel">
+      <h2>Trade history</h2>
+      <p class="cnote">"Since" is what each trade has done from its fill price to the last close.</p>
+      <div class="tablewrap"><table id="hist"><thead><tr>
+        <th class="l">Date</th><th class="l">Trade</th><th>Amount</th><th class="hide-sm">Fill</th><th>Since</th><th></th>
+      </tr></thead><tbody></tbody></table></div>
+    </section>
+  </div>
+
+  <div class="notes">
+    <p><b>How it works.</b> The account started with $1,000,000 in cash on January 2, 2026. Cash earns the T-bill rate (it is valued with SGOV). Prices include dividends. Anyone with the link can view this page; only your Deal Intelligence login can trade.</p>
+    <p><b>New tickers</b> you add or buy are priced after the next nightly data run, about 2:30 PM Pacific on weekdays. Until then a buy shows as pending.</p>
+    <p id="errs" style="color:var(--down)"></p>
+  </div>
+</div>
+
+<div id="modal" hidden></div>
+
+<script>
+// ---------- settings ----------
+const SUPA_URL='https://lgjujubysmkmdkcpjuse.supabase.co/rest/v1';
+const SUPA_KEY='sb_publishable_p3PAuJUaJgR-ZcbkiD0dHA_7PJtqdyW';
+const SUPA_AUTH=SUPA_URL.replace('/rest/v1','/auth/v1');
+const TOKEN_KEY='bdi_session';           // shared with Deal Intelligence: same login
+const ACCOUNT='picks', BENCH='VTI';
+
+// ---------- helpers ----------
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const pct=v=>v==null||!isFinite(v)?"–":(v>0?"+":"")+(v*100).toFixed(1)+"%";
+const cls=v=>v==null||!isFinite(v)?"flat":v>0.0005?"up":v<-0.0005?"down":"flat";
+const money=(v,sign)=>{if(v==null||!isFinite(v))return "–";const a=Math.abs(v);const t=a>=1e6?"$"+(a/1e6).toFixed(2)+"M":a>=1e4?"$"+(a/1e3).toFixed(1)+"K":"$"+Math.round(a).toLocaleString("en-US");return (v<0?"−":sign&&v>0?"+":"")+t};
+const usd=v=>v==null||!isFinite(v)?"–":"$"+v.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+const shift=(d,days)=>{const x=new Date(d+"T00:00:00Z");x.setUTCDate(x.getUTCDate()-days);return x.toISOString().slice(0,10)};
+const fmtD=d=>new Date(d+"T00:00:00Z").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric",timeZone:"UTC"});
+const todayLocal=()=>{const d=new Date();return new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,10)};
+function onOrBefore(s,d){let lo=0,hi=s.length-1,a=null;while(lo<=hi){const m=(lo+hi)>>1;if(s[m][0]<=d){a=s[m];lo=m+1}else hi=m-1}return a}
+function onOrAfter(s,d){let lo=0,hi=s.length-1,a=null;while(lo<=hi){const m=(lo+hi)>>1;if(s[m][0]>=d){a=s[m];hi=m-1}else lo=m+1}return a}
+function ticks(min,max,n){const span=max-min||1,s0=span/n,mag=Math.pow(10,Math.floor(Math.log10(s0))),e=s0/mag,st=(e>=7.5?10:e>=3.5?5:e>=1.5?2:1)*mag;const o=[];for(let v=Math.ceil(min/st)*st;v<=max+1e-9;v+=st)o.push(+v.toFixed(10));return o}
+function spark(series,days,w=96,h=24){
+  if(!series||series.length<2)return "";const end=series[series.length-1][0],s=series.filter(r=>r[0]>=shift(end,days));if(s.length<2)return "";
+  const vs=s.map(r=>r[1]),mn=Math.min(...vs),mx=Math.max(...vs),rg=mx-mn||1;
+  const pts=vs.map((v,i)=>[(i/(vs.length-1))*(w-4)+2,h-3-((v-mn)/rg)*(h-6)]),d=pts.map((p,i)=>(i?"L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1)).join("");
+  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><path d="${d}L${w-2} ${h}L2 ${h}Z" fill="var(--sparkfill)"/><path d="${d}" fill="none" stroke="var(--spark)" stroke-width="1.3"/></svg>`;
+}
+
+// ---------- auth (same session as Deal Intelligence) ----------
+function getSession(){try{return JSON.parse(localStorage.getItem(TOKEN_KEY)||"null")}catch(e){return null}}
+function setSession(s){try{s?localStorage.setItem(TOKEN_KEY,JSON.stringify(s)):localStorage.removeItem(TOKEN_KEY)}catch(e){}window.SESSION=s}
+window.SESSION=getSession();
+function hdrs(extra={}){const s=window.SESSION;return {apikey:SUPA_KEY,Authorization:"Bearer "+(s&&s.access_token?s.access_token:SUPA_KEY),"Content-Type":"application/json",...extra}}
+async function refresh(){const s=getSession();if(!s||!s.refresh_token)return false;
+  const r=await fetch(`${SUPA_AUTH}/token?grant_type=refresh_token`,{method:"POST",headers:{apikey:SUPA_KEY,"Content-Type":"application/json"},body:JSON.stringify({refresh_token:s.refresh_token})});
+  if(!r.ok){setSession(null);return false}const d=await r.json();if(!d.access_token){setSession(null);return false}setSession(d);return true}
+async function api(path,opts={}){
+  let r=await fetch(SUPA_URL+path,{...opts,headers:hdrs(opts.headers)});
+  if(r.status===401&&window.SESSION){if(await refresh())r=await fetch(SUPA_URL+path,{...opts,headers:hdrs(opts.headers)})}
+  return r;
+}
+async function signIn(email,password){const r=await fetch(`${SUPA_AUTH}/token?grant_type=password`,{method:"POST",headers:{apikey:SUPA_KEY,"Content-Type":"application/json"},body:JSON.stringify({email,password})});
+  const d=await r.json().catch(()=>({}));if(!r.ok||!d.access_token)return d.error_description||d.msg||"Sign in failed";setSession(d);return null}
+const signedIn=()=>!!(window.SESSION&&window.SESSION.access_token);
+function renderAuth(){
+  const el=document.getElementById("auth");
+  if(signedIn()){el.innerHTML=`<span>Signed in</span><button class="btn sm" id="so">Sign out</button>`;document.getElementById("so").onclick=()=>{setSession(null);renderAll()}}
+  else{el.innerHTML=`<span>Viewing only</span><button class="btn sm primary" id="si">Sign in to trade</button>`;document.getElementById("si").onclick=openSignIn}
+  document.querySelectorAll("#addrow input,#addrow button").forEach(x=>x.disabled=!signedIn());
+}
+
+// ---------- state ----------
+let MKT=null, PX={}, NAMES={}, START="2026-01-02", DEPOSIT=1000000, CASH_SYM="SGOV";
+let TRADES=[], WATCH=[], SIM=null;
+
+async function loadDB(){
+  const errs=[];
+  try{const r=await api(`/paper_trades?account=eq.${ACCOUNT}&select=*&order=trade_date.asc,created_at.asc`);if(r.ok)TRADES=await r.json();else errs.push("Trades could not be loaded ("+r.status+"). Has the setup script been run in Supabase?")}catch(e){errs.push("Trades could not be loaded.")}
+  try{const r=await api(`/watchlist?select=*&order=added_at.desc`);if(r.ok)WATCH=await r.json();else errs.push("Watchlist could not be loaded ("+r.status+").")}catch(e){errs.push("Watchlist could not be loaded.")}
+  document.getElementById("errs").textContent=errs.join(" ");
+}
+
+// ---------- engine ----------
+function px(sym,d){const s=PX[sym];if(!s)return null;const r=onOrBefore(s,d);return r?r[1]:null}
+function simulate(){
+  const bench=PX[BENCH];if(!bench||!PX[CASH_SYM])return null;
+  const dates=bench.filter(r=>r[0]>=START).map(r=>r[0]);if(!dates.length)return null;
+  const u={},cost={},fills={}; u[CASH_SYM]=DEPOSIT/px(CASH_SYM,dates[0]);
+  const values=[];let ti=0;const tr=[...TRADES].sort((a,b)=>a.trade_date<b.trade_date?-1:a.trade_date>b.trade_date?1:(a.side===b.side?0:a.side==='sell'?-1:1));
+  for(const d of dates){
+    while(ti<tr.length&&tr[ti].trade_date<=d){
+      const t=tr[ti++],sym=t.symbol,s=PX[sym];
+      if(!s||s[0][0]>d){continue}                      // not priced yet: pending
+      const p=px(sym,d),cp=px(CASH_SYM,d);
+      if(t.side==="buy"){let dol=t.dollars!=null?+t.dollars:+t.shares*p;dol=Math.min(dol,u[CASH_SYM]*cp);
+        u[sym]=(u[sym]||0)+dol/p;u[CASH_SYM]-=dol/cp;cost[sym]=(cost[sym]||0)+dol;fills[t.id]={date:d,price:p,shares:dol/p,dollars:dol}}
+      else{const have=u[sym]||0;let sh=t.shares!=null?+t.shares:+t.dollars/p;sh=Math.min(sh,have);
+        if(have>0)cost[sym]=(cost[sym]||0)*(1-sh/have);u[sym]=have-sh;u[CASH_SYM]+=sh*p/cp;fills[t.id]={date:d,price:p,shares:sh,dollars:sh*p}}
+    }
+    let v=0;for(const k in u){const p=px(k,d);if(p)v+=u[k]*p}values.push(v);
+  }
+  const last=dates[dates.length-1], b0=px(BENCH,dates[0]);
+  const shadow=dates.map(d=>DEPOSIT*px(BENCH,d)/b0);
+  return {dates,values,shadow,units:u,cost,fills,last,cash:u[CASH_SYM]*px(CASH_SYM,last)};
+}
+
+// cash you can spend now: settled cash, minus pending buys, plus pending sales at the last close
+function pendingAdj(S){let buys=0,sells=0;for(const t of TRADES){if(S&&S.fills[t.id])continue;
+  if(t.side==="buy")buys+=t.dollars?+t.dollars:(PX[t.symbol]?+t.shares*PX[t.symbol][PX[t.symbol].length-1][1]:0);
+  else{const ser=PX[t.symbol],p=ser?ser[ser.length-1][1]:0;sells+=t.dollars?+t.dollars:(+t.shares||0)*p}}
+  return {buys,sells,avail:(S?S.cash:0)-buys+sells}}
+// ---------- render ----------
+function chart(dates,lines,W=900,H=260){
+  const L=62,R=130,T=8,B=22,all=lines.flatMap(l=>l.vals);let mn=Math.min(...all),mx=Math.max(...all);const pad=(mx-mn)*.08||mx*.02;mn-=pad;mx+=pad;
+  const X=i=>L+i/(dates.length-1||1)*(W-L-R),Y=v=>T+(mx-v)/(mx-mn)*(H-T-B);
+  let g=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Account value versus the same money in VTI">`;
+  for(const t of ticks(mn,mx,4))g+=`<line class="grid" x1="${L}" x2="${W-R}" y1="${Y(t)}" y2="${Y(t)}"/><text class="ax" x="${L-6}" y="${Y(t)+4}" text-anchor="end">${money(t)}</text>`;
+  [0,Math.floor((dates.length-1)/2),dates.length-1].forEach((i,k)=>{g+=`<text class="ax" x="${X(i)}" y="${H-6}" text-anchor="${k===0?"start":k===2?"end":"middle"}">${new Date(dates[i]+"T00:00:00Z").toLocaleDateString("en-US",{month:"short",day:"numeric",timeZone:"UTC"})}</text>`});
+  const ends=lines.map(l=>({l,y:Y(l.vals[l.vals.length-1])})).sort((a,b)=>a.y-b.y);for(let i=1;i<ends.length;i++)if(ends[i].y-ends[i-1].y<14)ends[i].y=ends[i-1].y+14;
+  for(const l of lines)g+=`<path d="${l.vals.map((v,i)=>(i?"L":"M")+X(i).toFixed(1)+" "+Y(v).toFixed(1)).join("")}" fill="none" stroke="${l.color}" stroke-width="2" ${l.dash?'stroke-dasharray="5 4"':""}/>`;
+  for(const e of ends){const v=e.l.vals[e.l.vals.length-1];g+=`<circle cx="${X(dates.length-1)}" cy="${Y(v)}" r="3.5" fill="${e.l.color}" stroke="var(--panel)" stroke-width="2"/><text class="blab" x="${W-R+8}" y="${e.y+4}">${esc(e.l.label)} ${money(v)}</text>`}
+  return g+`</svg>`;
+}
+
+function renderSummary(){
+  const S=SIM;if(!S){document.getElementById("kpis").innerHTML=`<div class="empty">No price data yet.</div>`;return}
+  const n=S.values.length-1,val=S.values[n],sh=S.shadow[n],gain=val-DEPOSIT,diff=val-sh;
+  const P=pendingAdj(S);
+  document.getElementById("kpis").innerHTML=`
+    <div class="kpi"><div class="k">Account value</div><div class="v">${money(val)}</div><div class="s ${cls(gain)}">${money(gain,true)} · ${pct(val/DEPOSIT-1)}</div></div>
+    <div class="kpi"><div class="k">Same money in ${BENCH}</div><div class="v">${money(sh)}</div><div class="s ${cls(sh-DEPOSIT)}">${pct(sh/DEPOSIT-1)}</div></div>
+    <div class="kpi"><div class="k">You vs ${BENCH}</div><div class="v ${cls(diff)}">${money(diff,true)}</div><div class="s">${diff<0?"behind the total market":"ahead of the total market"}</div></div>
+    <div class="kpi"><div class="k">Cash</div><div class="v">${money(S.cash)}</div><div class="s">${P.buys||P.sells?money(P.avail)+" available after pending trades":"earning the T-bill rate"}</div></div>`;
+  document.getElementById("verdict").innerHTML=`Since ${fmtD(START)}, your picks are ${diff<0?`<b class="down">${money(-diff)} behind</b>`:`<b class="up">${money(diff)} ahead of</b>`} the same $1M left in the total stock market.`;
+  document.getElementById("chart").innerHTML=chart(S.dates,[{label:"My Picks",vals:S.values,color:"var(--pa)"},{label:"All "+BENCH,vals:S.shadow,color:"var(--muted)",dash:true}]);
+}
+
+function renderPositions(){
+  const S=SIM,tb=document.querySelector("#pos tbody");if(!S){tb.innerHTML="";return}
+  const val=S.values[S.values.length-1];
+  const rows=Object.keys(S.units).filter(k=>k!==CASH_SYM&&S.units[k]>1e-9).map(k=>{const p=px(k,S.last),s=PX[k],prev=s.length>1?s[s.length-2][1]:null;const v=S.units[k]*p,c=S.cost[k]||0;return {k,sh:S.units[k],v,c,g:v-c,r:c?v/c-1:null,d1:prev?s[s.length-1][1]/prev-1:null}}).sort((a,b)=>b.v-a.v);
+  const pend=TRADES.filter(t=>!S.fills[t.id]);
+  let html=rows.map(r=>`<tr><td class="sym">${esc(r.k)}</td><td class="nm hide-sm">${esc(NAMES[r.k]||"")}</td><td class="hide-sm">${r.sh.toLocaleString("en-US",{maximumFractionDigits:r.sh<10?3:0})}</td><td>${money(r.c)}</td><td>${money(r.v)}</td><td class="${cls(r.g)}">${money(r.g,true)}</td><td class="${cls(r.r)}">${pct(r.r)}</td><td class="hide-sm">${(r.v/val*100).toFixed(1)}%</td><td class="hide-sm ${cls(r.d1)}">${pct(r.d1)}</td><td class="hide-sm">${spark(PX[r.k],91)}</td>
+    <td class="act"><button class="btn sm buy" data-t="buy" data-s="${esc(r.k)}">Buy</button><button class="btn sm sell" data-t="sell" data-s="${esc(r.k)}">Sell</button></td></tr>`).join("");
+  html+=pend.map(t=>`<tr><td class="sym">${esc(t.symbol)}</td><td class="nm hide-sm"><span class="tag pend">Pending</span> ${t.side} ${t.dollars?money(+t.dollars):(+t.shares)+" sh"} · fills ${!PX[t.symbol]?"after tonight's data run":"at the "+fmtD(t.trade_date)+" close"}</td><td class="hide-sm"></td><td></td><td></td><td></td><td></td><td class="hide-sm"></td><td class="hide-sm"></td><td class="hide-sm"></td><td></td></tr>`).join("");
+  html+=`<tr><td class="sym">Cash</td><td class="nm hide-sm">Money market</td><td class="hide-sm"></td><td></td><td>${money(S.cash)}</td><td></td><td></td><td class="hide-sm">${(S.cash/val*100).toFixed(1)}%</td><td class="hide-sm"></td><td class="hide-sm"></td><td class="act"><button class="btn sm buy" data-t="buy" data-s="">New buy</button></td></tr>`;
+  tb.innerHTML=html;
+}
+
+function renderHistory(){
+  const S=SIM,tb=document.querySelector("#hist tbody");
+  const rows=[...TRADES].reverse();
+  if(!rows.length){tb.innerHTML=`<tr><td colspan="6" class="empty">No trades yet.</td></tr>`;return}
+  tb.innerHTML=rows.map(t=>{const f=S&&S.fills[t.id],lastP=f?px(t.symbol,S.last):null,since=f&&lastP?(t.side==="buy"?lastP/f.price-1:-(lastP/f.price-1)):null;
+    const amt=f?money(f.dollars):(t.dollars?money(+t.dollars):(+t.shares)+" sh");
+    return `<tr><td class="l">${esc(fmtD(t.trade_date))}</td><td class="l"><span style="color:var(--${t.side==="buy"?"buy":"sell"});font-weight:600">${t.side==="buy"?"Buy":"Sell"}</span> ${esc(t.symbol)}${t.note&&t.note!=="Starting position"?`<div style="font:12px var(--f-body);color:var(--muted);white-space:normal">${esc(t.note)}</div>`:""}</td>
+      <td>${amt}</td><td class="hide-sm">${f?usd(f.price):`<span class="pend">pending</span>`}</td><td class="${cls(since)}" title="${t.side==="sell"?"For a sale, positive means the stock fell after you sold":""}">${pct(since)}</td>
+      <td class="act">${signedIn()?`<button class="btn sm" data-del="${esc(t.id)}">Delete</button>`:""}</td></tr>`}).join("");
+}
+
+function renderWatch(){
+  const tb=document.querySelector("#watch tbody");
+  if(!WATCH.length){tb.innerHTML=`<tr><td colspan="7" class="empty">${signedIn()?"Add a ticker above to start watching it.":"Nothing on the watchlist yet."}</td></tr>`;return}
+  tb.innerHTML=WATCH.map(w=>{const s=PX[w.symbol];
+    if(!s)return `<tr><td class="sym">${esc(w.symbol)}<div style="font:12px var(--f-body);color:var(--muted)">${esc(w.name||"")}</div></td><td colspan="5" class="l" style="color:var(--muted);font-family:var(--f-body)">Priced after tonight's data run</td><td class="act">${signedIn()?`<button class="btn sm" data-unwatch="${esc(w.symbol)}">Remove</button>`:""}</td></tr>`;
+    const last=s[s.length-1],added=(w.added_at||"").slice(0,10),a=onOrBefore(s,added)||s[0],m1=onOrBefore(s,shift(last[0],30)),ytd=onOrBefore(s,(+last[0].slice(0,4)-1)+"-12-31");
+    const r=x=>x?last[1]/x[1]-1:null;
+    return `<tr><td class="sym">${esc(w.symbol)}<div style="font:12px var(--f-body);color:var(--muted);max-width:160px;white-space:normal">${esc(w.name||NAMES[w.symbol]||"")}</div></td><td>${usd(last[1])}</td><td class="${cls(r(a))}">${pct(r(a))}</td><td class="hide-sm ${cls(r(m1))}">${pct(r(m1))}</td><td class="${cls(r(ytd))}">${pct(r(ytd))}</td><td class="hide-sm">${spark(s,365)}</td>
+      <td class="act"><button class="btn sm buy" data-t="buy" data-s="${esc(w.symbol)}">Buy</button>${signedIn()?`<button class="btn sm" data-unwatch="${esc(w.symbol)}">Remove</button>`:""}</td></tr>`}).join("");
+}
+
+function renderAll(){renderAuth();SIM=simulate();renderSummary();renderPositions();renderHistory();renderWatch()}
+
+// ---------- actions ----------
+document.addEventListener("click",async e=>{
+  const b=e.target.closest("button");if(!b)return;
+  if(b.dataset.t){if(!signedIn())return openSignIn();openTicket(b.dataset.t,b.dataset.s)}
+  else if(b.dataset.del){if(b.dataset.armed!=="1"){b.dataset.armed="1";b.textContent="Confirm";b.classList.add("sell");setTimeout(()=>{if(b.isConnected){b.dataset.armed="";b.textContent="Delete";b.classList.remove("sell")}},4000);return}
+    const r=await api(`/paper_trades?id=eq.${encodeURIComponent(b.dataset.del)}`,{method:"DELETE",headers:{Prefer:"return=representation"}});
+    const d=r.ok?await r.json():[];if(!r.ok||!d.length){alertMsg("That trade could not be deleted. This login may be view-only.");return}
+    await loadDB();renderAll()}
+  else if(b.dataset.unwatch){const r=await api(`/watchlist?symbol=eq.${encodeURIComponent(b.dataset.unwatch)}`,{method:"DELETE",headers:{Prefer:"return=representation"}});
+    const d=r.ok?await r.json():[];if(!r.ok||!d.length){setW("Could not remove it. This login may be view-only.",true);return}await loadDB();renderAll()}
+});
+function setW(t,err){const m=document.getElementById("wmsg");m.textContent=t;m.className="msg "+(err?"err":"ok")}
+function alertMsg(t){document.getElementById("errs").textContent=t}
+document.getElementById("wadd").onclick=async()=>{
+  const sym=document.getElementById("wsym").value.trim().toUpperCase(),name=document.getElementById("wname").value.trim();
+  if(!/^[A-Z0-9.\-]{1,10}$/.test(sym)){setW("Enter a ticker symbol, like TSLA or BRK.B.",true);return}
+  if(WATCH.some(w=>w.symbol===sym)){setW(sym+" is already on the watchlist.",true);return}
+  const r=await api(`/watchlist`,{method:"POST",headers:{Prefer:"return=representation"},body:JSON.stringify({symbol:sym,name:name||NAMES[sym]||null})});
+  if(!r.ok){setW("Could not add it. "+(r.status===401||r.status===403?"This login may be view-only.":"Error "+r.status+"."),true);return}
+  document.getElementById("wsym").value="";document.getElementById("wname").value="";
+  setW(PX[sym]?sym+" added.":sym+" added. It will be priced after tonight's data run.",false);await loadDB();renderAll();
+};
+document.getElementById("wsym").addEventListener("keydown",e=>{if(e.key==="Enter")document.getElementById("wadd").click()});
+
+// ---------- modals ----------
+const modal=document.getElementById("modal");
+function closeModal(){modal.hidden=true;modal.innerHTML=""}
+modal.addEventListener("click",e=>{if(e.target.classList.contains("scrim"))closeModal()});
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!modal.hidden)closeModal()});
+
+function openSignIn(){
+  modal.innerHTML=`<div class="scrim"><form class="ticket signin" id="sif"><h3>Sign in</h3><p class="cnote" style="margin:0">Use your Deal Intelligence login.</p>
+    <div class="field"><label for="sie">Email</label><input id="sie" type="email" autocomplete="username" required></div>
+    <div class="field"><label for="sip">Password</label><input id="sip" type="password" autocomplete="current-password" required></div>
+    <p class="msg err" id="sim"></p><div class="tactions"><button type="button" class="btn" id="sic">Cancel</button><button class="btn primary">Sign in</button></div></form></div>`;
+  modal.hidden=false;document.getElementById("sie").focus();
+  document.getElementById("sic").onclick=closeModal;
+  document.getElementById("sif").onsubmit=async e=>{e.preventDefault();const err=await signIn(document.getElementById("sie").value,document.getElementById("sip").value);
+    if(err){document.getElementById("sim").textContent=err;return}closeModal();await loadDB();renderAll()};
+}
+
+function openTicket(side,sym){
+  const S=SIM,priced=Object.keys(PX).sort(),held=S?Object.keys(S.units).filter(k=>k!==CASH_SYM&&S.units[k]>1e-9):[];
+  const opts=[...new Set([...held,...WATCH.map(w=>w.symbol),...priced])].filter(k=>k!==CASH_SYM);
+  modal.innerHTML=`<div class="scrim"><form class="ticket" id="tf" novalidate><h3>Trade ticket</h3>
+    <div class="seg" role="group" aria-label="Buy or sell"><button type="button" class="b" data-side="buy">Buy</button><button type="button" class="s" data-side="sell">Sell</button></div>
+    <div class="row2"><div class="field"><label for="tsym">Ticker</label><input id="tsym" list="tlist" autocomplete="off" style="text-transform:uppercase" value="${esc(sym||"")}"><datalist id="tlist">${opts.map(o=>`<option value="${esc(o)}">${esc(NAMES[o]||"")}</option>`).join("")}</datalist></div>
+      <div class="field"><label for="tdate">Trade date</label><input id="tdate" type="date" min="${START}" max="${todayLocal()}" value="${todayLocal()}"></div></div>
+    <div class="field"><label>Amount</label><div class="seg" role="group" aria-label="Amount in"><button type="button" class="n" data-mode="dollars">Dollars</button><button type="button" class="n" data-mode="shares">Shares</button><button type="button" class="n" data-mode="all">Sell all</button></div></div>
+    <div class="field" id="amtf"><label for="tamt" id="tamtl">Dollars</label><input id="tamt" type="number" min="0" step="any" inputmode="decimal" placeholder="50000"></div>
+    <div class="field"><label for="tnote">Why (optional)</label><input id="tnote" maxlength="200" placeholder="e.g. grid buildout, Eaton supplier"></div>
+    <div class="preview" id="tprev"></div><p class="msg err" id="tmsg"></p>
+    <div class="tactions"><button type="button" class="btn" id="tcan">Cancel</button><button class="btn primary" id="tok">Place trade</button></div></form></div>`;
+  modal.hidden=false;
+  let SIDE=side||"buy",MODE="dollars";
+  const $=id=>document.getElementById(id);
+  function sync(){
+    document.querySelectorAll("[data-side]").forEach(b=>b.setAttribute("aria-pressed",b.dataset.side===SIDE));
+    const allBtn=document.querySelector('[data-mode="all"]');allBtn.hidden=SIDE!=="sell";if(SIDE!=="sell"&&MODE==="all")MODE="dollars";
+    document.querySelectorAll("[data-mode]").forEach(b=>b.setAttribute("aria-pressed",b.dataset.mode===MODE));
+    $("amtf").hidden=MODE==="all";$("tamtl").textContent=MODE==="shares"?"Shares":"Dollars";$("tok").textContent=SIDE==="buy"?"Place buy":"Place sale";
+    $("tok").className="btn primary";preview();
+  }
+  function calc(){
+    const s=$("tsym").value.trim().toUpperCase(),amt=parseFloat($("tamt").value),d=$("tdate").value,ser=PX[s];
+    const last=ser?ser[ser.length-1]:null,pendSold=TRADES.filter(t=>t.side==="sell"&&t.symbol===s&&!(S&&S.fills[t.id])).reduce((a,t)=>a+(t.shares?+t.shares:(last?+t.dollars/last[1]:0)),0),held=Math.max(0,(S&&S.units[s]?S.units[s]:0)-pendSold);
+    const avail=pendingAdj(S).avail;
+    let dollars=null,shares=null;
+    if(MODE==="all"){shares=held}else if(MODE==="shares"){shares=amt}else{dollars=amt}
+    const estD=dollars!=null?dollars:(shares&&last?shares*last[1]:null),estS=shares!=null?shares:(dollars&&last?dollars/last[1]:null);
+    let err="";
+    if(!/^[A-Z0-9.\-]{1,10}$/.test(s))err="Enter a ticker.";
+    else if(!d||d<START)err="Pick a trade date on or after "+fmtD(START)+".";
+    else if(d>todayLocal())err="The trade date can't be in the future.";
+    else if(MODE!=="all"&&!(amt>0))err="Enter an amount.";
+    else if(SIDE==="buy"&&estD!=null&&estD>avail+0.5)err="Not enough cash: "+money(avail)+" available.";
+    else if(SIDE==="buy"&&!last&&MODE==="shares")err="Buy new tickers in dollars; the share price isn't known until tonight's data run.";
+    else if(SIDE==="sell"&&!held)err="You don't hold "+s+".";
+    else if(SIDE==="sell"&&estS>held+1e-6)err="You hold "+held.toFixed(held<10?3:0)+" shares of "+s+".";
+    return {s,d,dollars,shares,estD,estS,last,held,avail,err};
+  }
+  function preview(){
+    const c=calc();let h="";
+    if(c.last)h+=`Last close <b>${usd(c.last[1])}</b> on ${fmtD(c.last[0])}.<br>`;else if(c.s)h+=`<b>${esc(c.s)}</b> isn't priced yet; it will be after tonight's data run.<br>`;
+    if(c.estD)h+=`${SIDE==="buy"?"Buying":"Selling"} about <b>${money(c.estD)}</b>${c.estS?` · ${c.estS.toLocaleString("en-US",{maximumFractionDigits:3})} shares`:""}.<br>`;
+    h+=`Fills at the close on ${c.d?fmtD(c.d):"the trade date"} (next trading day if closed). Cash available: <b>${money(c.avail)}</b>.`;
+    $("tprev").innerHTML=h;$("tmsg").textContent="";
+  }
+  document.querySelectorAll("[data-side]").forEach(b=>b.onclick=()=>{SIDE=b.dataset.side;sync()});
+  document.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{MODE=b.dataset.mode;sync()});
+  ["tsym","tamt","tdate"].forEach(id=>$(id).addEventListener("input",preview));
+  $("tcan").onclick=closeModal;
+  $("tf").onsubmit=async e=>{e.preventDefault();const c=calc();if(c.err){$("tmsg").textContent=c.err;return}
+    const row={account:ACCOUNT,trade_date:c.d,side:SIDE,symbol:c.s,note:$("tnote").value.trim()||null};
+    if(MODE==="dollars")row.dollars=Math.round(c.dollars*100)/100;else row.shares=+(+c.shares).toFixed(6);
+    $("tok").disabled=true;
+    const r=await api(`/paper_trades`,{method:"POST",headers:{Prefer:"return=representation"},body:JSON.stringify(row)});
+    if(!r.ok){$("tok").disabled=false;$("tmsg").textContent=r.status===401||r.status===403?"This login can view but not trade.":"The trade didn't save (error "+r.status+"). Try again.";return}
+    if(SIDE==="buy"&&!WATCH.some(w=>w.symbol===c.s)&&!PX[c.s]) await api(`/watchlist`,{method:"POST",body:JSON.stringify({symbol:c.s})}); // so tonight's run prices it
+    closeModal();await loadDB();renderAll();
+  };
+  sync();setTimeout(()=>(sym?$("tamt"):$("tsym")).focus(),30);
+}
+
+// ---------- boot ----------
+(async()=>{
+  try{
+    const [m,pf]=await Promise.all([fetch("data/market.json",{cache:"no-store"}).then(r=>r.json()),fetch("data/portfolios.json",{cache:"no-store"}).then(r=>r.ok?r.json():null).catch(()=>null)]);
+    MKT=m;for(const a of m.assets){PX[a.symbol]=a.series;NAMES[a.symbol]=a.name}
+    const acct=pf&&pf.accounts.find(a=>a.id===ACCOUNT);if(acct){START=acct.start;DEPOSIT=acct.deposit;CASH_SYM=acct.cash_asset||"SGOV"}
+    const upd=new Date(m.updated.replace("Z",":00Z"));document.getElementById("fresh").textContent="Prices as of "+upd.toLocaleString("en-US",{dateStyle:"medium",timeStyle:"short"});
+  }catch(e){document.getElementById("fresh").textContent="Price data unavailable";}
+  if(window.SESSION&&window.SESSION.expires_at&&window.SESSION.expires_at*1000<Date.now()+6e4)await refresh();
+  await loadDB();renderAll();
+})();
+</script>
+</body>
+</html>
